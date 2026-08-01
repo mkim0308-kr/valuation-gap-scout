@@ -1,0 +1,90 @@
+"""Agent 1: System Quant. No LLM calls in this module — only API data pulls
+and deterministic math, so downstream agents can't hallucinate the numbers."""
+from __future__ import annotations
+
+import json
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+from quant import dcf, market_data, sec_data
+
+DATA_DIR = Path(__file__).parent.parent / "data"
+
+
+def run_quant_agent(ticker: str) -> dict:
+    ticker = ticker.upper()
+
+    fcf_series = sec_data.get_10yr_fcf_series(ticker)
+    if not fcf_series:
+        raise RuntimeError(
+            f"No SEC EDGAR FCF data found for {ticker} — check the ticker is a "
+            "US filer and try again (SEC rate limits can also cause gaps)."
+        )
+    fcf_cagr = sec_data.compute_cagr(fcf_series)
+    latest_year = max(fcf_series)
+    latest_fcf = fcf_series[latest_year]
+
+    risk_free_rate = market_data.get_risk_free_rate()
+    capital = market_data.get_capital_structure(ticker)
+
+    wacc = dcf.calculate_wacc(
+        market_cap=capital["market_cap"],
+        total_debt=capital["total_debt"],
+        beta=capital["beta"],
+        risk_free_rate=risk_free_rate,
+        effective_tax_rate=capital["effective_tax_rate"],
+    )
+
+    valuation = dcf.calculate_fair_value(
+        latest_fcf=latest_fcf,
+        fcf_cagr=fcf_cagr,
+        wacc=wacc,
+        total_debt=capital["total_debt"],
+        shares_outstanding=capital["shares_outstanding"],
+    )
+
+    gap = dcf.valuation_gap(capital["current_price"], valuation["fair_value_per_share"])
+
+    result = {
+        "ticker": ticker,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "source": {
+            "fcf_history": "SEC EDGAR XBRL (10-K, OperatingCashFlow - CapEx)",
+            "market_data": "yfinance",
+            "risk_free_rate": "^TNX (10yr UST yield)",
+        },
+        "10yr_metrics": {
+            "fcf_by_fiscal_year": fcf_series,
+            "fcf_cagr": round(fcf_cagr, 5) if fcf_cagr is not None else None,
+            "latest_fcf": latest_fcf,
+        },
+        "macro_inputs": {
+            "risk_free_rate": risk_free_rate,
+        },
+        "capital_structure": capital,
+        "dcf_model_output": {
+            "dynamic_wacc": wacc,
+            **valuation,
+            "current_price": capital["current_price"],
+            "valuation_gap_pct": gap,
+        },
+    }
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = DATA_DIR / f"{ticker}_quant.json"
+    out_path.write_text(json.dumps(result, indent=2, default=str))
+
+    return result
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python -m quant.quant_agent TICKER [TICKER ...]")
+        sys.exit(1)
+
+    for t in sys.argv[1:]:
+        print(f"Running quant agent for {t}...")
+        data = run_quant_agent(t)
+        print(json.dumps(data["dcf_model_output"], indent=2))
