@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from quant import dcf, market_data, sec_data
+from quant import dcf, market_data, relative_valuation, sec_data
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -45,6 +45,13 @@ def run_quant_agent(ticker: str) -> dict:
 
     gap = dcf.valuation_gap(capital["current_price"], valuation["fair_value_per_share"])
 
+    relative = relative_valuation.get_relative_valuation_metrics(
+        ticker,
+        latest_fcf=latest_fcf,
+        fcf_cagr=fcf_cagr,
+        shares_outstanding=capital["shares_outstanding"],
+    )
+
     result = {
         "ticker": ticker,
         "as_of": datetime.now(timezone.utc).isoformat(),
@@ -68,6 +75,7 @@ def run_quant_agent(ticker: str) -> dict:
             "current_price": capital["current_price"],
             "valuation_gap_pct": gap,
         },
+        "relative_valuation": relative,
     }
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
