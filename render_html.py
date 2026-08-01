@@ -85,6 +85,15 @@ li { margin-bottom: 6px; }
 strong { font-weight: 600; }
 hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
 
+blockquote {
+  margin: 0 0 16px;
+  padding: 8px 16px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+blockquote p { margin: 0; }
+
 table {
   width: 100%;
   border-collapse: collapse;
