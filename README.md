@@ -21,7 +21,7 @@ python main.py TICKER
       ├── quant/sec_data.py             SEC EDGAR XBRL: 10년 영업현금흐름/CapEx
       ├── quant/market_data.py          yfinance: 국채금리, 베타, 시가총액, 부채
       ├── quant/dcf.py                  동적 WACC 계산 + 5년 DCF 적정주가
-      └── quant/relative_valuation.py   Graham Number, PEG, ROE, ROIC, comps 배수, 오너어닝스
+      └── quant/relative_valuation.py   Graham Number, PEG, ROE, ROIC, PSR, comps 배수, 오너어닝스
       -> data/{TICKER}_quant.json 저장 (relative_valuation 필드 포함)
 
 python extended_metrics.py TICKER [--peers ...]   (선택, LLM 없음, 11개 모듈)
@@ -39,29 +39,37 @@ python extended_metrics.py TICKER [--peers ...]   (선택, LLM 없음, 11개 모
       -> data/{TICKER}_extended_metrics.json 저장
 
 Claude Code 채팅에서 이어서 요청
-├── [Agent 2] .claude/agents/tech-moat-auditor.md          기술/해자 감사
+├── [Agent 2] .claude/agents/tech-moat-auditor.md          비즈니스 해자 감사 (업종에 맞는 유형만 선택 — 아래 참고)
 ├── [Agent 3] .claude/agents/macro-risk-analyst.md         매크로/리스크 분석
-├── [Agent 4] .claude/agents/guru-perspective-analyst.md   Graham/Buffett/Lynch/Marks 공개 기준 적용
+├── [Agent 4] .claude/agents/guru-perspective-analyst.md   Graham/Buffett/Lynch/Marks/Ken Fisher/Greenblatt 6인의 공개 기준 적용
 ├── [Agent 6] .claude/agents/litigation-regulatory-agent.md 진행 중인 소송·규제 조사 검색 (선택)
 ├── [Agent 7] .claude/agents/consensus-bull-bear-agent.md  시장 강세론·약세론 양쪽 검색·인용 (선택)
-└── [Agent 5] .claude/agents/cfo-report-writer.md          CFO 리포트 (Markdown)
+├── [Agent 8] .claude/agents/debate-synthesis-agent.md     위 모든 산출물을 교차 비교해 일치점/긴장점 종합 (2~7 이후, 5 이전)
+└── [Agent 5] .claude/agents/cfo-report-writer.md          CFO 리포트 (Markdown, 맨 위에 종합 요약 배치)
       -> reports/{TICKER}_report.md 저장 (선택 입력 파일이 있으면 해당 섹션 추가)
       -> python render_html.py TICKER 실행 -> reports/{TICKER}_report.html 저장
 
-data/      Agent 1/1b~1g·6·7이 저장하는 원본 JSON + Agent 2/3/4의 중간 JSON
+data/      Agent 1/1b~1g·6·7·8이 저장하는 원본 JSON + Agent 2/3/4의 중간 JSON
 reports/   Agent 5가 저장하는 마크다운 리포트 + render_html.py가 생성하는 HTML
 tests/     단위 테스트 (quant/, render_html.py)
 ```
 
 Agent 2, 3, 4, 6, 7은 검색 없이 실행하면 근거가 부족한 항목을
 `insufficient_data`로 표시하도록 지시되어 있습니다 — 모르는 걸 지어내지
-않기 위함입니다. Agent 4(구루 관점)는 실제 인물의 의견이 아니라 **공개적으로
-알려진 투자 방법론(공식/기준)을 데이터에 기계적으로 대입한 결과**라는 점을
-항상 고지문에 명시하도록 제약되어 있습니다. Agent 6(소송·규제)은 승패를
-예측하지 않고 사실관계만 서술합니다. Agent 7(강세론·약세론)은 반드시 양쪽
-주장을 함께 인용하고 종합 결론을 내리지 않습니다. CFO 리포트(Agent 5)는
-항상 투자 자문 아님 고지문을 포함하고, 매수/매도 같은 행동 지시 문구를 쓰지
-않도록 제약되어 있습니다.
+않기 위함입니다. **Agent 2(비즈니스 해자)**는 반도체 제조사 전용 체크리스트가
+아니라 Morningstar의 5가지 경제적 해자 분류(네트워크 효과/전환비용/원가우위/
+무형자산/효율적 규모)를 바탕으로, 먼저 회사의 업종·비즈니스 모델을 파악한 뒤
+실제로 해당하는 유형만 골라 분석합니다. **Agent 4(구루 관점)**는 실제 인물의
+의견이 아니라 **공개적으로 알려진 투자 방법론(공식/기준)을 데이터에
+기계적으로 대입한 결과**라는 점을 항상 고지문에 명시하도록 제약되어
+있습니다. Agent 6(소송·규제)은 승패를 예측하지 않고 사실관계만 서술합니다.
+Agent 7(강세론·약세론)은 반드시 양쪽 주장을 함께 인용하고 종합 결론을
+내리지 않습니다. **Agent 8(종합 판단)**은 다른 에이전트들이 서로 실시간
+대화하지 않는다는 점을 전제로, 모든 산출물을 사후에 읽고 비교해 일치점·
+긴장점·종합 서술을 만듭니다 — 진짜 "토론"이 아니라 사후 교차검증이라는
+점을 리포트에도 명시합니다. CFO 리포트(Agent 5)는 항상 투자 자문 아님
+고지문을 포함하고, 매수/매도 같은 행동 지시 문구를 쓰지 않도록 제약되어
+있습니다.
 
 ## 설치
 
@@ -108,12 +116,15 @@ python extended_metrics.py AAPL --peers MSFT GOOGL NVDA
 
 `tech-moat-auditor` → `macro-risk-analyst` → `guru-perspective-analyst` →
 (선택) `litigation-regulatory-agent` → (선택) `consensus-bull-bear-agent`
-→ `cfo-report-writer` 서브에이전트가 순서대로 실행되어
-`data/AAPL_tech_moat.json`, `data/AAPL_macro_risk.json`,
+→ `debate-synthesis-agent` → `cfo-report-writer` 서브에이전트가 순서대로
+실행되어 `data/AAPL_tech_moat.json`, `data/AAPL_macro_risk.json`,
 `data/AAPL_guru_perspectives.json`, (선택)
 `data/AAPL_litigation_regulatory.json`, (선택)
-`data/AAPL_bull_bear_consensus.json`, `reports/AAPL_report.md`를 생성하고,
-마지막에 `render_html.py`를 실행해 `reports/AAPL_report.html`까지 만듭니다.
+`data/AAPL_bull_bear_consensus.json`, `data/AAPL_executive_summary.json`,
+`reports/AAPL_report.md`를 생성하고, 마지막에 `render_html.py`를 실행해
+`reports/AAPL_report.html`까지 만듭니다. `executive_summary.json`은
+나머지 에이전트 결과를 모두 교차 비교한 종합으로, 리포트 맨 위에
+"종합 요약" 섹션으로 배치됩니다.
 
 **4단계 — HTML만 다시 렌더링하고 싶을 때 (터미널)**
 
@@ -145,9 +156,20 @@ pytest tests/
   않으면 `None`으로 남습니다 (지어내지 않음). PEG 계산용 성장률도 yfinance의
   forward 추정치가 없으면 10년 FCF CAGR로 대체하며, 이 경우
   `growth_rate_source`에 대체 사용 사실이 표시됩니다.
-- "구루 관점"(Agent 4)은 Graham/Buffett/Lynch/Marks가 저서·주주서한 등에서
-  **공개한 방법론을 기계적으로 계산에 대입**한 것으로, 해당 인물의 실제
-  의견이나 이 회사에 대한 언급이 아닙니다.
+- "구루 관점"(Agent 4)은 Graham/Buffett/Lynch/Marks/Ken Fisher/Greenblatt가
+  저서·주주서한 등에서 **공개한 방법론을 기계적으로 계산에 대입**한 것으로,
+  해당 인물의 실제 의견이나 이 회사에 대한 언급이 아닙니다. Ken Fisher의
+  PSR 기준은 1980년대 산업재·경기순환주 대상으로 검증된 것이라, 자산
+  경량화 플랫폼/서비스 기업에는 원래 설계 의도와 잘 맞지 않을 수 있습니다.
+- **비즈니스 해자**(Agent 2)는 반도체 제조사 전용 체크리스트가 아니라
+  업종에 맞는 해자 유형을 선택해 분석하도록 바뀌었습니다. 다만 업종
+  판단 자체가 WebSearch 결과에 의존하므로, 잘못 분류될 경우 뒤따르는
+  분석의 관련성이 떨어질 수 있습니다.
+- **종합 요약**(Agent 8, debate-synthesis-agent)은 다른 에이전트들이
+  실시간으로 서로 대화하며 만들어낸 결론이 아닙니다 — 이 프레임워크의
+  서브에이전트는 각자 독립적으로 실행되고 결과만 반환하므로, "토론"은
+  한 에이전트가 모든 결과물을 사후에 읽고 비교하는 방식으로 시뮬레이션한
+  것입니다. 리포트 본문에도 이 사실이 명시됩니다.
 - **피어 비교**: `quant/peer_comps.py`의 기본 피어 그룹은 이 프로젝트가
   다루는 빅테크·반도체 종목 십여 개만 커버하는 수작업 목록입니다. 목록에
   없는 티커는 `--peers`로 직접 지정해야 하며, 지정하지 않으면

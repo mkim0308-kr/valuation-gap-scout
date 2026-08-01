@@ -33,6 +33,7 @@ COMPARED_FIELDS = {
     "forward_pe": "forwardPE",
     "ev_to_ebitda": "enterpriseToEbitda",
     "price_to_book": "priceToBook",
+    "price_to_sales": "priceToSalesTrailing12Months",
     "return_on_equity": "returnOnEquity",
 }
 
