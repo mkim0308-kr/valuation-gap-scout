@@ -15,6 +15,7 @@ OPERATING_CASHFLOW_TAGS = ["NetCashProvidedByUsedInOperatingActivities"]
 CAPEX_TAGS = [
     "PaymentsToAcquirePropertyPlantAndEquipment",
     "PaymentsForCapitalImprovements",
+    "PaymentsToAcquireProductiveAssets",
 ]
 
 
@@ -63,14 +64,21 @@ def _annual_series_from_concept(concept_json: dict) -> dict[int, float]:
 
 
 def _first_available_series(cik: str, tags: list[str]) -> dict[int, float]:
+    """Merge annual series across all given tags (setdefault per year), since
+    companies sometimes switch which XBRL tag they report a line item under
+    partway through their filing history (e.g. Amazon's capex moved from
+    PaymentsToAcquirePropertyPlantAndEquipment to PaymentsToAcquireProductiveAssets
+    starting FY2018) — using only the first tag with any data would silently
+    truncate the series instead of covering the company's full history."""
+    merged: dict[int, float] = {}
     for tag in tags:
         concept = _get_xbrl_concept(cik, tag)
         time.sleep(0.15)  # be polite to SEC rate limits
         if concept:
             series = _annual_series_from_concept(concept)
-            if series:
-                return series
-    return {}
+            for year, val in series.items():
+                merged.setdefault(year, val)
+    return merged
 
 
 def get_annual_xbrl_series(ticker: str, tags: list[str]) -> dict[int, float]:

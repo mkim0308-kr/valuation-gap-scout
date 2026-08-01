@@ -18,10 +18,15 @@ def run_pipeline(ticker: str) -> None:
     print(f"\n=== {ticker} ===")
     print("[Agent 1] 퀀트: SEC EDGAR + yfinance에서 데이터 수집 및 DCF 계산 중...")
     quant_json = run_quant_agent(ticker)
-    gap_pct = quant_json["dcf_model_output"]["valuation_gap_pct"] * 100
-    print(f"  -> DCF 적정가 ${quant_json['dcf_model_output']['fair_value_per_share']} "
-          f"vs 현재가 ${quant_json['dcf_model_output']['current_price']} "
-          f"(괴리율 {gap_pct:+.1f}%)")
+    dcf_output = quant_json["dcf_model_output"]
+    if dcf_output["valuation_gap_pct"] is None:
+        print(f"  -> DCF 적정가 산출 불가 (insufficient_data: {dcf_output['insufficient_data_reason']}) "
+              f"vs 현재가 ${dcf_output['current_price']}")
+    else:
+        gap_pct = dcf_output["valuation_gap_pct"] * 100
+        print(f"  -> DCF 적정가 ${dcf_output['fair_value_per_share']} "
+              f"vs 현재가 ${dcf_output['current_price']} "
+              f"(괴리율 {gap_pct:+.1f}%)")
     print(f"  -> data/{ticker}_quant.json 저장 완료")
     print("  -> 다음 단계: Claude Code에서 \"AAPL 분석 리포트 만들어줘\"라고 요청하면 "
           "tech-moat-auditor / macro-risk-analyst / cfo-report-writer 서브에이전트가 이어서 진행합니다.")

@@ -35,15 +35,31 @@ def run_quant_agent(ticker: str) -> dict:
         effective_tax_rate=capital["effective_tax_rate"],
     )
 
-    valuation = dcf.calculate_fair_value(
-        latest_fcf=latest_fcf,
-        fcf_cagr=fcf_cagr,
-        wacc=wacc,
-        total_debt=capital["total_debt"],
-        shares_outstanding=capital["shares_outstanding"],
-    )
-
-    gap = dcf.valuation_gap(capital["current_price"], valuation["fair_value_per_share"])
+    dcf_insufficient_data_reason = None
+    try:
+        valuation = dcf.calculate_fair_value(
+            latest_fcf=latest_fcf,
+            fcf_cagr=fcf_cagr,
+            wacc=wacc,
+            total_debt=capital["total_debt"],
+            shares_outstanding=capital["shares_outstanding"],
+        )
+        gap = dcf.valuation_gap(capital["current_price"], valuation["fair_value_per_share"])
+    except ValueError as e:
+        # A single anomalous base-year FCF (e.g. a temporary capex supercycle)
+        # can push equity value negative — that's a real model limitation, not
+        # a reason to fabricate a number, so we degrade to insufficient_data
+        # instead of crashing the whole pipeline (relative valuation below is
+        # still computed independently of the DCF base year).
+        dcf_insufficient_data_reason = str(e)
+        valuation = {
+            "growth_rate_used": None,
+            "projected_fcfs": None,
+            "enterprise_value": None,
+            "equity_value": None,
+            "fair_value_per_share": None,
+        }
+        gap = None
 
     relative = relative_valuation.get_relative_valuation_metrics(
         ticker,
@@ -75,6 +91,7 @@ def run_quant_agent(ticker: str) -> dict:
             **valuation,
             "current_price": capital["current_price"],
             "valuation_gap_pct": gap,
+            "insufficient_data_reason": dcf_insufficient_data_reason,
         },
         "relative_valuation": relative,
     }
