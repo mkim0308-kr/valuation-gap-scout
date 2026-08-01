@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 data/*.json
 reports/*.md
+reports/*.html
 .pytest_cache/
 .DS_Store

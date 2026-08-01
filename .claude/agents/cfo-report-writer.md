@@ -30,5 +30,16 @@ tools: Read, Write
 * 💡 참고 시나리오 (행동 지시 없이, 조건-관찰 형태로만)
 ```
 
-`reports/{TICKER}_report.md`로 Write하세요. 완료 후 리포트 경로와 핵심 요약 한두
-문장만 보고하세요.
+## 마크다운 작성 시 주의
+- 중첩 글머리 기호(sub-bullet)를 쓰지 마세요. `render_html.py`가 사용하는
+  Python-Markdown 파서는 2칸 들여쓰기 중첩 리스트를 제대로 인식하지 못해
+  HTML 변환 시 목록 구조가 깨집니다. 하위 항목이 필요하면 한 문단에 쉼표로
+  나열하거나, 별도 문장으로 풀어 쓰세요.
+
+`reports/{TICKER}_report.md`로 Write한 뒤, 아래 명령으로 HTML도 함께
+생성하세요:
+```
+python render_html.py {TICKER}
+```
+완료 후 두 파일 경로(`reports/{TICKER}_report.md`, `reports/{TICKER}_report.html`)와
+핵심 요약 한두 문장만 보고하세요.

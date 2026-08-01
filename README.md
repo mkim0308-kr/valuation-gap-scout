@@ -28,10 +28,11 @@ Claude Code 채팅에서 이어서 요청
 ├── [Agent 3] .claude/agents/macro-risk-analyst.md  매크로/리스크 분석
 └── [Agent 4] .claude/agents/cfo-report-writer.md   CFO 리포트 (Markdown)
       -> reports/{TICKER}_report.md 저장
+      -> python render_html.py TICKER 실행 -> reports/{TICKER}_report.html 저장
 
 data/      Agent 1이 저장하는 원본 JSON + Agent 2/3의 중간 JSON
-reports/   Agent 4가 저장하는 최종 마크다운 리포트
-tests/     dcf.py 단위 테스트
+reports/   Agent 4가 저장하는 마크다운 리포트 + render_html.py가 생성하는 HTML
+tests/     단위 테스트 (quant/, render_html.py)
 ```
 
 Agent 2, 3은 검색 없이 실행하면 근거가 부족한 항목을 `insufficient_data`로
@@ -70,7 +71,20 @@ python main.py AAPL
 
 `tech-moat-auditor` → `macro-risk-analyst` → `cfo-report-writer` 서브에이전트가
 순서대로 실행되어 `data/AAPL_tech_moat.json`, `data/AAPL_macro_risk.json`,
-최종 `reports/AAPL_report.md`를 생성합니다.
+`reports/AAPL_report.md`를 생성하고, 마지막에 `render_html.py`를 실행해
+`reports/AAPL_report.html`까지 만듭니다.
+
+**3단계 — HTML만 다시 렌더링하고 싶을 때 (터미널)**
+
+마크다운 리포트를 수정했거나 HTML만 다시 뽑고 싶으면:
+
+```bash
+python render_html.py AAPL
+```
+
+`reports/AAPL_report.html`을 브라우저로 열면 시스템 라이트/다크 모드에 맞춰
+자동으로 배색이 바뀌는 깔끔한 리포트 페이지를 볼 수 있습니다 (서버·외부
+CDN·자바스크립트 없이 동작하는 단일 HTML 파일).
 
 ## 테스트
 
