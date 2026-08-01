@@ -70,6 +70,7 @@ def get_relative_valuation_metrics(
     forward_pe = info.get("forwardPE")
     ev_to_ebitda = info.get("enterpriseToEbitda")
     price_to_book = info.get("priceToBook")
+    price_to_sales = info.get("priceToSalesTrailing12Months")
     trailing_eps = info.get("trailingEps")
     book_value_per_share = info.get("bookValue")
     dividend_yield = info.get("dividendYield")
@@ -114,6 +115,7 @@ def get_relative_valuation_metrics(
             "forward_pe": forward_pe,
             "ev_to_ebitda": ev_to_ebitda,
             "price_to_book": price_to_book,
+            "price_to_sales": price_to_sales,
             "dividend_yield": dividend_yield,
         },
         "graham_number": {

@@ -1,6 +1,6 @@
 ---
 name: guru-perspective-analyst
-description: Use this agent to apply well-known, publicly documented value-investing frameworks (Graham, Buffett, Lynch, Marks) mechanically to a company's numbers. Invoke after data/{TICKER}_quant.json, data/{TICKER}_tech_moat.json, and data/{TICKER}_macro_risk.json exist.
+description: Use this agent to apply well-known, publicly documented value-investing frameworks (Graham, Buffett, Lynch, Marks, Ken Fisher, Greenblatt) mechanically to a company's numbers. Invoke after data/{TICKER}_quant.json, data/{TICKER}_tech_moat.json, and data/{TICKER}_macro_risk.json exist.
 tools: Read, Write
 ---
 
@@ -44,6 +44,19 @@ owner earnings, comps 배수 포함), `data/{TICKER}_tech_moat.json`,
    `cycle_position`과 `critical_risks`, 그리고 DCF 밸류에이션 괴리율을
    근거로, Marks가 저서 「투자에 대한 생각」에서 강조한 "지금이 사이클의
    어디쯤인지 아는 것"과 "리스크 대비 보상 비대칭" 관점을 데이터에 대입.
+5. **Ken Fisher (PSR)**: `relative_valuation.comps_multiples.price_to_sales`를
+   이용. Fisher는 저서 「Super Stocks」에서 PSR(주가매출액비율) 기준을
+   제시했습니다 — PSR 0.75 미만은 매력적, 1.5 초과는 기피, 3.0 초과는
+   강하게 기피 대상이라는 기준입니다 (원래는 산업재·경기순환주를
+   대상으로 검증된 기준이라는 한계를 함께 언급하세요).
+6. **Joel Greenblatt (Magic Formula)**: EBIT
+   (`relative_valuation.profitability.roic_inputs.ebit`)과 시가총액·부채·
+   현금(`capital_structure`)으로 시장 기준 Enterprise Value = 시가총액 +
+   총부채 - 현금을 계산한 뒤, Earnings Yield = EBIT / Enterprise Value를
+   구하세요. Greenblatt가 「주식시장을 이기는 작은 책」에서 제시한 매직
+   포뮬러는 **높은 ROIC(자본수익률) + 높은 Earnings Yield(이익수익률)**
+   조합을 매력적으로 봅니다 — `relative_valuation.profitability.return_on_invested_capital`과
+   함께 이 두 지표를 서술하세요.
 
 ## 출력
 `data/{TICKER}_guru_perspectives.json`을 아래 스키마로 Write하세요:
@@ -66,6 +79,16 @@ owner earnings, comps 배수 포함), `data/{TICKER}_tech_moat.json`,
     },
     "marks_cycle_and_risk": {
       "reading": "..."
+    },
+    "fisher_psr": {
+      "reading": "...",
+      "psr_value": "숫자 또는 insufficient_data",
+      "fisher_zone": "attractive(<0.75)|neutral|avoid(>1.5)|strongly_avoid(>3.0)|insufficient_data"
+    },
+    "greenblatt_magic_formula": {
+      "reading": "...",
+      "roic_pct": "숫자 또는 insufficient_data",
+      "earnings_yield_pct": "숫자 또는 insufficient_data"
     }
   }
 }
