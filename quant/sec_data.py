@@ -73,6 +73,17 @@ def _first_available_series(cik: str, tags: list[str]) -> dict[int, float]:
     return {}
 
 
+def get_annual_xbrl_series(ticker: str, tags: list[str]) -> dict[int, float]:
+    """Public entry point for pulling any us-gaap XBRL tag's annual 10-K
+    series for a ticker — {fiscal_year: value}, trying each tag in `tags`
+    in order until one has data. Used by any module that needs a raw SEC
+    line item beyond the FCF series below (e.g. capital allocation)."""
+    cik = get_cik(ticker)
+    if not cik:
+        return {}
+    return _first_available_series(cik, tags)
+
+
 def get_10yr_fcf_series(ticker: str) -> dict[int, float]:
     """Returns {fiscal_year: free_cash_flow} for up to the last 10 fiscal years,
     computed as Operating Cash Flow - CapEx, sourced from SEC 10-K XBRL facts."""

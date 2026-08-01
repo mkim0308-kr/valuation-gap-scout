@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import yfinance as yf
 
+from quant.statement_utils import first_value
+
 
 def compute_graham_number(eps: float | None, book_value_per_share: float | None) -> float | None:
     """Benjamin Graham's conservative intrinsic-value formula:
@@ -30,13 +32,39 @@ def compute_peg_ratio(pe_ratio: float | None, growth_rate_pct: float | None) -> 
     return round(pe_ratio / growth_rate_pct, 2)
 
 
+def compute_roic(
+    ebit: float | None,
+    total_debt: float | None,
+    total_equity: float | None,
+    cash: float | None,
+    effective_tax_rate: float | None,
+) -> float | None:
+    """Return on Invested Capital = NOPAT / Invested Capital, where
+    NOPAT = EBIT * (1 - tax rate) and Invested Capital = Total Debt +
+    Total Equity - Cash. None if any input is missing or invested capital
+    isn't positive (the ratio is meaningless for a net-cash-negative capital
+    base)."""
+    if None in (ebit, total_debt, total_equity, cash, effective_tax_rate):
+        return None
+    invested_capital = total_debt + total_equity - cash
+    if invested_capital <= 0:
+        return None
+    nopat = ebit * (1 - effective_tax_rate)
+    return round(nopat / invested_capital, 5)
+
+
 def get_relative_valuation_metrics(
-    ticker: str, latest_fcf: float, fcf_cagr: float | None, shares_outstanding: float
+    ticker: str,
+    latest_fcf: float,
+    fcf_cagr: float | None,
+    shares_outstanding: float,
+    effective_tax_rate: float | None = None,
 ) -> dict:
     """Pulls comps multiples and classic value metrics from yfinance, and
-    derives Graham Number / PEG / owner earnings on top. Any field yfinance
-    doesn't report comes back as None rather than a guessed value."""
-    info = yf.Ticker(ticker).get_info()
+    derives Graham Number / PEG / owner earnings / ROIC on top. Any field
+    yfinance doesn't report comes back as None rather than a guessed value."""
+    ticker_obj = yf.Ticker(ticker)
+    info = ticker_obj.get_info()
 
     trailing_pe = info.get("trailingPE")
     forward_pe = info.get("forwardPE")
@@ -63,6 +91,23 @@ def get_relative_valuation_metrics(
         round(latest_fcf / shares_outstanding, 2) if shares_outstanding else None
     )
 
+    return_on_equity = info.get("returnOnEquity")
+
+    financials = ticker_obj.financials
+    balance_sheet = ticker_obj.balance_sheet
+    ebit = first_value(financials, ["EBIT", "Operating Income"])
+    total_debt_bs = first_value(balance_sheet, ["Total Debt"])
+    total_equity = first_value(
+        balance_sheet, ["Stockholders Equity", "Total Stockholder Equity", "Common Stock Equity"]
+    )
+    cash = first_value(
+        balance_sheet,
+        ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments", "Cash"],
+    )
+    return_on_invested_capital = compute_roic(
+        ebit, total_debt_bs, total_equity, cash, effective_tax_rate
+    )
+
     return {
         "comps_multiples": {
             "trailing_pe": trailing_pe,
@@ -85,5 +130,16 @@ def get_relative_valuation_metrics(
         "owner_earnings": {
             "per_share": owner_earnings_per_share,
             "method": "Warren Buffett proxy: latest 10-K-derived FCF / shares outstanding",
+        },
+        "profitability": {
+            "return_on_equity": return_on_equity,
+            "return_on_invested_capital": return_on_invested_capital,
+            "roic_inputs": {
+                "ebit": ebit,
+                "total_debt": total_debt_bs,
+                "total_equity": total_equity,
+                "cash": cash,
+                "effective_tax_rate": effective_tax_rate,
+            },
         },
     }
