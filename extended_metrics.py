@@ -1,6 +1,8 @@
-"""Runs the five extended-metrics agents (peer comps, earnings quality,
+"""Runs the eleven extended-metrics agents (peer comps, earnings quality,
 insider/institutional activity, historical price positioning, options
-market signal) and writes data/{TICKER}_extended_metrics.json.
+market signal, balance-sheet health, capital allocation, shareholder yield,
+short interest, analyst estimates, realized-vs-implied volatility) and
+writes data/{TICKER}_extended_metrics.json.
 
 All deterministic — no LLM, no API key needed, same as main.py.
 
@@ -15,11 +17,17 @@ import sys
 from pathlib import Path
 
 from quant import (
+    analyst_estimates,
+    balance_sheet_health,
+    capital_allocation,
     earnings_quality,
     historical_valuation,
     insider_institutional,
     options_market_signal,
     peer_comps,
+    shareholder_yield,
+    short_interest,
+    volatility_comparison,
 )
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -35,6 +43,12 @@ def run_extended_metrics(ticker: str, peer_tickers: list[str] | None = None) -> 
         "insider_institutional": insider_institutional.get_insider_institutional_metrics(ticker),
         "historical_valuation": historical_valuation.get_historical_valuation_context(ticker),
         "options_market_signal": options_market_signal.get_options_market_signal(ticker),
+        "balance_sheet_health": balance_sheet_health.get_balance_sheet_health(ticker),
+        "capital_allocation": capital_allocation.get_capital_allocation_history(ticker),
+        "shareholder_yield": shareholder_yield.get_shareholder_yield_metrics(ticker),
+        "short_interest": short_interest.get_short_interest_metrics(ticker),
+        "analyst_estimates": analyst_estimates.get_analyst_estimates(ticker),
+        "volatility_comparison": volatility_comparison.get_volatility_comparison(ticker),
     }
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -45,7 +59,10 @@ def run_extended_metrics(ticker: str, peer_tickers: list[str] | None = None) -> 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="확장 지표 5종 (peer, 이익품질, 내부자/기관, 과거밴드, 옵션)")
+    parser = argparse.ArgumentParser(
+        description="확장 지표 11종 (peer, 이익품질, 내부자/기관, 과거밴드, 옵션, "
+        "재무건전성, 자본배치, 주주환원, 공매도, 애널리스트, 변동성)"
+    )
     parser.add_argument("ticker", help="예: AAPL")
     parser.add_argument("--peers", nargs="*", default=None, help="비교할 피어 티커 (예: MSFT GOOGL AMZN)")
     args = parser.parse_args()
@@ -62,6 +79,11 @@ def main() -> None:
     print(f"  -> Beneish M-Score: {result['earnings_quality']['beneish_m_score']['value']}")
     print(f"  -> 내부자 매매(최근): buy={result['insider_institutional']['insider_transactions_recent']['transaction_counts'].get('buy')}, "
           f"sell={result['insider_institutional']['insider_transactions_recent']['transaction_counts'].get('sell')}")
+    print(f"  -> Altman Z-Score: {result['balance_sheet_health']['altman_z_score']['value']} "
+          f"({result['balance_sheet_health']['altman_z_score']['zone']})")
+    print(f"  -> 자본배치 비중: {result['capital_allocation']['allocation_mix_pct']}")
+    print(f"  -> 총주주환원율: {result['shareholder_yield']['total_shareholder_yield_pct']}%")
+    print(f"  -> 애널리스트 평균 목표가: {result['analyst_estimates']['price_targets']['mean']}")
 
 
 if __name__ == "__main__":
