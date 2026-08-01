@@ -50,6 +50,7 @@ def run_quant_agent(ticker: str) -> dict:
         latest_fcf=latest_fcf,
         fcf_cagr=fcf_cagr,
         shares_outstanding=capital["shares_outstanding"],
+        effective_tax_rate=capital["effective_tax_rate"],
     )
 
     result = {

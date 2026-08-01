@@ -21,18 +21,26 @@ python main.py TICKER
       ├── quant/sec_data.py             SEC EDGAR XBRL: 10년 영업현금흐름/CapEx
       ├── quant/market_data.py          yfinance: 국채금리, 베타, 시가총액, 부채
       ├── quant/dcf.py                  동적 WACC 계산 + 5년 DCF 적정주가
-      └── quant/relative_valuation.py   Graham Number, PEG, comps 배수, 오너어닝스
+      └── quant/relative_valuation.py   Graham Number, PEG, ROE, ROIC, comps 배수, 오너어닝스
       -> data/{TICKER}_quant.json 저장 (relative_valuation 필드 포함)
+
+python extended_metrics.py TICKER [--peers ...]   (선택, LLM 없음)
+├── quant/peer_comps.py             피어 그룹 대비 배수/ROE 비교
+├── quant/earnings_quality.py       Sloan 발생액 비율 + Beneish M-Score
+├── quant/insider_institutional.py  내부자 매매 요약 + 기관/내부자 보유 비중
+├── quant/historical_valuation.py   5년/52주 가격 밴드 내 퍼센타일
+└── quant/options_market_signal.py  ATM 내재변동성 + 풋/콜 비율
+      -> data/{TICKER}_extended_metrics.json 저장
 
 Claude Code 채팅에서 이어서 요청
 ├── [Agent 2] .claude/agents/tech-moat-auditor.md        기술/해자 감사
 ├── [Agent 3] .claude/agents/macro-risk-analyst.md       매크로/리스크 분석
 ├── [Agent 4] .claude/agents/guru-perspective-analyst.md Graham/Buffett/Lynch/Marks 공개 기준 적용
 └── [Agent 5] .claude/agents/cfo-report-writer.md        CFO 리포트 (Markdown)
-      -> reports/{TICKER}_report.md 저장
+      -> reports/{TICKER}_report.md 저장 (extended_metrics.json이 있으면 5개 섹션 추가)
       -> python render_html.py TICKER 실행 -> reports/{TICKER}_report.html 저장
 
-data/      Agent 1이 저장하는 원본 JSON + Agent 2/3/4의 중간 JSON
+data/      Agent 1/1b~1g이 저장하는 원본 JSON + Agent 2/3/4의 중간 JSON
 reports/   Agent 5가 저장하는 마크다운 리포트 + render_html.py가 생성하는 HTML
 tests/     단위 테스트 (quant/, render_html.py)
 ```
@@ -68,7 +76,19 @@ python main.py AAPL
 `data/AAPL_quant.json`이 생성되고, SEC 10년 FCF·WACC·DCF 적정가·밸류에이션
 괴리율이 콘솔에 출력됩니다.
 
-**2단계 — 해석 리포트 생성 (Claude Code 채팅)**
+**2단계 — 확장 지표 수집 (선택, 터미널)**
+
+```bash
+python extended_metrics.py AAPL --peers MSFT GOOGL NVDA
+```
+
+피어 비교, 이익의 질(Beneish M-Score 등), 내부자·기관 동향, 과거 가격 밴드
+위치, 옵션 시장 신호까지 `data/AAPL_extended_metrics.json`에 저장됩니다.
+`--peers`를 생략하면 몇몇 빅테크/반도체 종목에 한해 기본 피어 그룹을
+사용하고, 그 외 종목은 `insufficient_data`로 남습니다. 이 단계를
+건너뛰어도 3단계는 정상 동작합니다 (해당 섹션만 리포트에서 빠집니다).
+
+**3단계 — 해석 리포트 생성 (Claude Code 채팅)**
 
 이 채팅(또는 아무 Claude Code 세션)에서 이렇게 요청하세요:
 
@@ -80,7 +100,7 @@ python main.py AAPL
 `data/AAPL_guru_perspectives.json`, `reports/AAPL_report.md`를 생성하고,
 마지막에 `render_html.py`를 실행해 `reports/AAPL_report.html`까지 만듭니다.
 
-**3단계 — HTML만 다시 렌더링하고 싶을 때 (터미널)**
+**4단계 — HTML만 다시 렌더링하고 싶을 때 (터미널)**
 
 마크다운 리포트를 수정했거나 HTML만 다시 뽑고 싶으면:
 
@@ -113,3 +133,23 @@ pytest tests/
 - "구루 관점"(Agent 4)은 Graham/Buffett/Lynch/Marks가 저서·주주서한 등에서
   **공개한 방법론을 기계적으로 계산에 대입**한 것으로, 해당 인물의 실제
   의견이나 이 회사에 대한 언급이 아닙니다.
+- **피어 비교**: `quant/peer_comps.py`의 기본 피어 그룹은 이 프로젝트가
+  다루는 빅테크·반도체 종목 십여 개만 커버하는 수작업 목록입니다. 목록에
+  없는 티커는 `--peers`로 직접 지정해야 하며, 지정하지 않으면
+  `insufficient_data`로 남습니다.
+- **이익의 질**: Beneish M-Score는 8개 구성요소가 모두 계산 가능해야
+  산출되며, yfinance 재무제표에 필요한 항목이 없으면 `None`입니다. 임계값을
+  넘어도 회계 조작을 의미하지 않습니다 — 매출/자산이 빠르게 느는 고성장
+  기업은 정상적으로도 지표가 높게 나오는 경향이 있는, 잘 알려진 오탐
+  패턴입니다.
+- **내부자 매매 요약**: yfinance에 신뢰할 수 있는 거래 유형 코드가 없어,
+  SEC Form 4의 자유 텍스트 설명("Sale...", "Purchase...", "Stock Gift...")을
+  키워드로 분류합니다. 옵션 행사·부여 등은 "other"로 분류되며 매수/매도
+  판단에 포함되지 않습니다.
+- **과거 밴드 내 위치**: 5년/52주 가격 퍼센타일이지, 과거 시점의 DCF
+  밸류에이션 갭을 재계산한 것이 아닙니다 (과거 재무제표 전체를 다시
+  가져와야 해서 범위 밖으로 뒀습니다). 순수하게 "지금 가격이 최근 가격
+  범위 중 어디쯤인지"를 보여주는 지표입니다.
+- **옵션 시장 신호**: 내재변동성·풋/콜 비율은 현재 옵션 시장의 포지셔닝
+  스냅샷이며, 미래 방향을 예측하는 지표가 아닙니다. 만기 30일 근처 옵션
+  체인 하나만 사용합니다.

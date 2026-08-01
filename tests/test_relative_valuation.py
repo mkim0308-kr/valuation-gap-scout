@@ -1,6 +1,6 @@
 import pytest
 
-from quant.relative_valuation import compute_graham_number, compute_peg_ratio
+from quant.relative_valuation import compute_graham_number, compute_peg_ratio, compute_roic
 
 
 def test_compute_graham_number_matches_known_calculation():
@@ -23,3 +23,29 @@ def test_compute_peg_ratio_matches_known_calculation():
 )
 def test_compute_peg_ratio_undefined_for_non_positive_or_missing_inputs(pe, growth):
     assert compute_peg_ratio(pe, growth) is None
+
+
+def test_compute_roic_matches_known_calculation():
+    # NOPAT = 100 * (1 - 0.2) = 80; invested capital = 200 + 300 - 50 = 450
+    # ROIC = 80 / 450 = 0.17778
+    roic = compute_roic(ebit=100, total_debt=200, total_equity=300, cash=50, effective_tax_rate=0.2)
+    assert roic == pytest.approx(0.17778, abs=0.00001)
+
+
+def test_compute_roic_none_when_invested_capital_not_positive():
+    # total_debt + total_equity - cash <= 0
+    assert compute_roic(ebit=100, total_debt=10, total_equity=10, cash=50, effective_tax_rate=0.2) is None
+
+
+@pytest.mark.parametrize(
+    "ebit,debt,equity,cash,tax",
+    [
+        (None, 200, 300, 50, 0.2),
+        (100, None, 300, 50, 0.2),
+        (100, 200, None, 50, 0.2),
+        (100, 200, 300, None, 0.2),
+        (100, 200, 300, 50, None),
+    ],
+)
+def test_compute_roic_none_when_any_input_missing(ebit, debt, equity, cash, tax):
+    assert compute_roic(ebit, debt, equity, cash, tax) is None
