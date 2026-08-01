@@ -8,7 +8,8 @@ DEFAULT_BETA = 1.0  # fallback if yfinance doesn't report one
 
 
 def get_risk_free_rate() -> float:
-    """10-year US Treasury yield (^TNX quotes in index points = yield * 10)."""
+    """10-year US Treasury yield (^TNX quotes the yield directly in percent,
+    e.g. a close of 4.745 means 4.745% — divide by 100 for a decimal fraction)."""
     tnx = yf.Ticker("^TNX").history(period="5d")
     if tnx.empty:
         raise RuntimeError("Could not fetch ^TNX treasury yield data")
