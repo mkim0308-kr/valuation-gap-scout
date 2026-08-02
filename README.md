@@ -18,7 +18,7 @@ Code 자체(이 채팅)의 정액 요금 안에서 동작합니다.
 ```
 python main.py TICKER
 └── [Agent 1] quant/quant_agent.py      하드 데이터만 다룸 (LLM 없음)
-      ├── quant/sec_data.py             SEC EDGAR XBRL: 10년 영업현금흐름/CapEx
+      ├── quant/sec_data.py             SEC EDGAR XBRL: 최근 5년 분기별(10-Q/10-K) 영업현금흐름/CapEx → TTM 롤업
       ├── quant/market_data.py          yfinance: 국채금리, 베타, 시가총액, 부채
       ├── quant/dcf.py                  동적 WACC 계산 + 5년 DCF 적정주가 + 역산 성장률(implied growth rate)
       ├── quant/residual_income.py      잔여이익모델(Residual Income) 적정가 — DCF와 독립적인 두 번째 기준점
@@ -108,8 +108,8 @@ API 키나 결제 설정이 필요 없습니다.
 python main.py AAPL
 ```
 
-`data/AAPL_quant.json`이 생성되고, SEC 10년 FCF·WACC·DCF 적정가·밸류에이션
-괴리율이 콘솔에 출력됩니다.
+`data/AAPL_quant.json`이 생성되고, SEC 5년 분기별(TTM) FCF·WACC·DCF 적정가·
+밸류에이션 괴리율이 콘솔에 출력됩니다.
 
 **2단계 — 확장 지표 수집 (선택, 터미널)**
 
@@ -206,15 +206,30 @@ pytest tests/
 
 ## 알려진 한계
 
-- SEC EDGAR XBRL 태그는 기업마다 명명이 조금씩 달라, 일부 종목은 10년 전체
-  FCF 데이터가 수집되지 않을 수 있습니다.
+- **FCF 이력은 10-K 연간 실적이 아니라 최근 5년 분기(10-Q/10-K) 데이터를
+  트레일링 12개월(TTM)로 롤업**해서 씁니다. 원래는 10-K 연간 수치 10년치를
+  썼는데, NVIDIA처럼 특정 기간 동안 연간(FY) 단위로는 CapEx를 태깅하지
+  않고 분기(10-Q) YTD 수치로만 보고한 기업(SEC 원본 데이터로 직접 확인함
+  — 2012~2023년 구간이 연간 태그 자체가 존재하지 않았음)은 사실상 두세
+  개 연도만 남아 "10년 이력"이라는 이름과 실제 근거가 크게 어긋나는
+  문제가 있었습니다. 분기 YTD 값을 차분해서 단일 분기 수치로 복원한 뒤
+  TTM으로 합산하는 방식으로 바꿔 이 문제를 해결했습니다.
+  **다만 이 변경은 NVDA만 고친 게 아니라 거의 모든 티커의 DCF 결과에
+  영향을 줍니다** — 분기 TTM 기준은 연간 기준보다 최근 변동성/모멘텀을
+  훨씬 예민하게 반영해서, 일부 종목은 괴리율이 오히려 더 커지거나
+  (예: 실제 확인된 사례로 GOOGL +85%→+485%, MSFT +276%→+426%,
+  TSLA +3228%→+7257%), 부호 자체가 바뀌기도 합니다(META가 프리미엄
+  +44%에서 디스카운트 -20.5%로 전환된 사례 확인). "더 정확해졌다"와
+  "더 극단적으로 보일 수 있다"는 동시에 참일 수 있다는 점을 참고하세요.
+  SEC EDGAR XBRL 태그는 기업마다 명명이 조금씩 달라, 이 방식으로도 일부
+  종목은 5년 전체 분기 데이터가 수집되지 않을 수 있습니다.
 - WACC의 부채비용은 개별 회사채 수익률이 아니라 국채금리 + 고정 스프레드로
   근사한 값입니다.
 - Agent 2/3은 서브에이전트에 WebSearch/WebFetch 도구가 있지만, 검색으로
   근거를 찾지 못하면 `insufficient_data`를 반환하도록 지시되어 있습니다.
 - `relative_valuation`의 P/E·EV/EBITDA·P/B·EPS·장부가는 yfinance가 제공하지
   않으면 `None`으로 남습니다 (지어내지 않음). PEG 계산용 성장률도 yfinance의
-  forward 추정치가 없으면 10년 FCF CAGR로 대체하며, 이 경우
+  forward 추정치가 없으면 5년 분기 TTM FCF CAGR로 대체하며, 이 경우
   `growth_rate_source`에 대체 사용 사실이 표시됩니다.
 - "구루 관점"(Agent 4)은 Graham/Buffett/Lynch/Marks/Ken Fisher/Greenblatt가
   저서·주주서한 등에서 **공개한 방법론을 기계적으로 계산에 대입**한 것으로,

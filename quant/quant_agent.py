@@ -14,15 +14,21 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 def run_quant_agent(ticker: str) -> dict:
     ticker = ticker.upper()
 
-    fcf_series = sec_data.get_10yr_fcf_series(ticker)
-    if not fcf_series:
+    fcf_quarters = sec_data.get_5yr_quarterly_fcf_series(ticker)
+    if not fcf_quarters:
         raise RuntimeError(
             f"No SEC EDGAR FCF data found for {ticker} — check the ticker is a "
             "US filer and try again (SEC rate limits can also cause gaps)."
         )
-    fcf_cagr = sec_data.compute_cagr(fcf_series)
-    latest_year = max(fcf_series)
-    latest_fcf = fcf_series[latest_year]
+    ttm_fcf_series = sec_data.compute_ttm_series(fcf_quarters)
+    if not ttm_fcf_series:
+        raise RuntimeError(
+            f"{ticker}: found quarterly SEC filings but no 4 consecutive quarters "
+            "to build a trailing-twelve-month FCF figure from."
+        )
+    fcf_cagr = sec_data.compute_quarterly_cagr(ttm_fcf_series)
+    latest_ttm_quarter = max(ttm_fcf_series, key=lambda label: (label.split("-")[0], label.split("-")[1]))
+    latest_fcf = ttm_fcf_series[latest_ttm_quarter]
 
     risk_free_rate = market_data.get_risk_free_rate()
     capital = market_data.get_capital_structure(ticker)
@@ -93,14 +99,19 @@ def run_quant_agent(ticker: str) -> dict:
         "ticker": ticker,
         "as_of": datetime.now(timezone.utc).isoformat(),
         "source": {
-            "fcf_history": "SEC EDGAR XBRL (10-K, OperatingCashFlow - CapEx)",
+            "fcf_history": (
+                "SEC EDGAR XBRL (10-Q/10-K, trailing 5yr, quarterly OperatingCashFlow - CapEx "
+                "reconstructed from as-filed YTD figures, rolled into trailing-twelve-month FCF)"
+            ),
             "market_data": "yfinance",
             "risk_free_rate": "^TNX (10yr UST yield)",
         },
-        "10yr_metrics": {
-            "fcf_by_fiscal_year": fcf_series,
+        "5yr_quarterly_metrics": {
+            "fcf_by_quarter": fcf_quarters,
+            "ttm_fcf_by_quarter": ttm_fcf_series,
             "fcf_cagr": round(fcf_cagr, 5) if fcf_cagr is not None else None,
-            "latest_fcf": latest_fcf,
+            "latest_ttm_fcf": latest_fcf,
+            "latest_ttm_quarter": latest_ttm_quarter,
         },
         "macro_inputs": {
             "risk_free_rate": risk_free_rate,
@@ -117,11 +128,11 @@ def run_quant_agent(ticker: str) -> dict:
                 **implied_growth,
                 "note": (
                     "implied_growth_rate는 현재가가 이 DCF 모델에서 정확히 적정가가 되도록 "
-                    "역산한 5년 성장률(소수, 예: 0.24=24%). historical_10yr_fcf_cagr, "
+                    "역산한 5년 성장률(소수, 예: 0.24=24%). historical_5yr_quarterly_fcf_cagr, "
                     "analyst_forward_growth_rate_pct와 비교해 시장이 가정하는 성장률이 "
                     "과거 실적·애널리스트 컨센서스 대비 합리적인 수준인지 판단하는 데 씁니다."
                 ),
-                "historical_10yr_fcf_cagr": round(fcf_cagr, 5) if fcf_cagr is not None else None,
+                "historical_5yr_quarterly_fcf_cagr": round(fcf_cagr, 5) if fcf_cagr is not None else None,
                 "analyst_forward_growth_rate_pct": relative.get("peg_ratio", {}).get(
                     "growth_rate_pct_used"
                 ),

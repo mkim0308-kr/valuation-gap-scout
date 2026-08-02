@@ -76,14 +76,15 @@ def get_relative_valuation_metrics(
     dividend_yield = info.get("dividendYield")
 
     # Prefer yfinance's own forward earnings-growth estimate for PEG; fall
-    # back to the 10yr FCF CAGR we already computed if it's unavailable.
+    # back to the 5yr quarterly TTM FCF CAGR we already computed if it's
+    # unavailable.
     earnings_growth = info.get("earningsGrowth")
     if earnings_growth is not None:
         growth_rate_pct = round(earnings_growth * 100, 2)
         growth_rate_source = "yfinance earningsGrowth (forward estimate)"
     elif fcf_cagr is not None:
         growth_rate_pct = round(fcf_cagr * 100, 2)
-        growth_rate_source = "10yr FCF CAGR (proxy — no forward earnings estimate available)"
+        growth_rate_source = "5yr quarterly TTM FCF CAGR (proxy — no forward earnings estimate available)"
     else:
         growth_rate_pct = None
         growth_rate_source = None
