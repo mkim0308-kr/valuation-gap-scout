@@ -3,8 +3,10 @@ venv/
 __pycache__/
 *.pyc
 data/*.json
+data/history/
 reports/*.md
 reports/*.html
+reports/history/
 .pytest_cache/
 .DS_Store
 .claude/settings.local.json

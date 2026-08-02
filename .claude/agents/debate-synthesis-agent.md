@@ -34,6 +34,10 @@ JSON으로 남깁니다. 당신의 역할은 그 결과물들을 **전부 읽고
   재무건전성/자본배치/주주환원/공매도/애널리스트/변동성
 - `data/{TICKER}_litigation_regulatory.json` (선택)
 - `data/{TICKER}_bull_bear_consensus.json` (선택)
+- `data/{TICKER}_trend.json` (선택) — `python -m quant.trend {TICKER}`로 생성됨.
+  1~6개월 전 스냅샷과의 숫자 비교(현재가/DCF 적정가/괴리율/P/E/ROE 변화).
+  `insufficient_data`가 true면(첫 실행이거나 참조 기간 내 이력 없음) 이
+  섹션은 건너뛰세요.
 
 ## 종합 방법
 1. **일치점(agreements)** 3~5개 찾기: 서로 다른 독립적 지표/프레임워크가
@@ -48,6 +52,13 @@ JSON으로 남깁니다. 당신의 역할은 그 결과물들을 **전부 읽고
    이 회사에 대한 여러 분석 렌즈가 전반적으로 어떤 그림을 그리는지
    3~5문장으로 서술합니다. 행동 지시 없이, "여러 지표가 공통적으로
    보여주는 것"과 "지표 간 이견이 있는 지점"을 균형 있게 언급하세요.
+4. **시계열 관찰(trend_observation, 선택)**: `data/{TICKER}_trend.json`이
+   있고 `insufficient_data`가 false면, 참조 시점(1~6개월 전) 대비 무엇이
+   바뀌었는지 1~2문장으로 관찰하세요. 예: "밸류에이션 괴리율이 지난
+   참조 시점 대비 확대/축소됨" 처럼 방향과 대략적 크기만 사실 기반으로
+   서술하고, 왜 그런지에 대한 추측은 다른 섹션(매크로/소송 등)의 근거가
+   있을 때만 덧붙이세요. trend.json이 없거나 insufficient_data가 true면
+   이 필드 자체를 출력에서 생략하세요(지어내지 않음).
 
 ## 출력
 `data/{TICKER}_executive_summary.json`을 아래 스키마로 Write하세요:
@@ -63,8 +74,10 @@ JSON으로 남깁니다. 당신의 역할은 그 결과물들을 **전부 읽고
   "key_tensions": [
     {"finding": "...", "sources": ["어떤 지표/에이전트들이 충돌했는지"], "likely_reason": "방법론/시계열/가정 차이 설명"}
   ],
-  "synthesized_takeaway": "3~5문장 종합 서술, 행동 지시 없이"
+  "synthesized_takeaway": "3~5문장 종합 서술, 행동 지시 없이",
+  "trend_observation": "trend.json이 유효할 때만 포함 — 1~2문장"
 }
 ```
 
-완료 후 일치점·긴장점 각각 몇 개를 찾았는지만 한두 문장으로 보고하세요.
+완료 후 일치점·긴장점 각각 몇 개를 찾았는지, trend_observation을 포함했는지만
+한두 문장으로 보고하세요.

@@ -48,10 +48,25 @@ Claude Code 채팅에서 이어서 요청
 └── [Agent 5] .claude/agents/cfo-report-writer.md          CFO 리포트 (Markdown, 맨 위에 종합 요약 배치)
       -> reports/{TICKER}_report.md 저장 (선택 입력 파일이 있으면 해당 섹션 추가)
       -> python render_html.py TICKER 실행 -> reports/{TICKER}_report.html 저장
+            -> quant/archive.py가 자동으로 data/history/{TICKER}/{날짜}/,
+               reports/history/{TICKER}/{날짜}/에 이번 실행 스냅샷을 보관
+
+python -m quant.trend TICKER   (선택, LLM 없음)
+└── quant/trend.py   1~6개월 전 참조 스냅샷과 현재값을 숫자로 비교
+      -> data/{TICKER}_trend.json 저장 (참조 이력 없으면 insufficient_data)
+      (debate-synthesis-agent·cfo-report-writer가 있으면 자동으로 반영)
+
+python summary_report.py [--check-stale]   (선택, LLM 없음)
+└── reports/ 폴더의 모든 티커를 모아 대시보드 생성 (파이프라인을 실행하지 않음 — 이미 있는 리포트만 집계)
+      -> reports/summary_report.html 저장 (티커별 링크 + 최근 ROE vs P/E 차트)
+      --check-stale: 요약 대신 30일 이상 갱신 안 된 티커 목록만 출력
 
 data/      Agent 1/1b~1g·6·7·8이 저장하는 원본 JSON + Agent 2/3/4의 중간 JSON
+data/history/{TICKER}/{날짜}/     실행마다 누적되는 원본 JSON 스냅샷
 reports/   Agent 5가 저장하는 마크다운 리포트 + render_html.py가 생성하는 HTML
-tests/     단위 테스트 (quant/, render_html.py)
+reports/history/{TICKER}/{날짜}/  실행마다 누적되는 리포트 스냅샷
+reports/summary_report.html       모든 티커를 모은 요약 대시보드
+tests/     단위 테스트 (quant/, render_html.py, summary_report.py)
 ```
 
 Agent 2, 3, 4, 6, 7은 검색 없이 실행하면 근거가 부족한 항목을
@@ -136,7 +151,50 @@ python render_html.py AAPL
 
 `reports/AAPL_report.html`을 브라우저로 열면 시스템 라이트/다크 모드에 맞춰
 자동으로 배색이 바뀌는 깔끔한 리포트 페이지를 볼 수 있습니다 (서버·외부
-CDN·자바스크립트 없이 동작하는 단일 HTML 파일).
+CDN·자바스크립트 없이 동작하는 단일 HTML 파일). 이 단계 마지막에
+`quant/archive.py`가 자동으로 오늘 실행 결과를 `data/history/`,
+`reports/history/`에 날짜별로 보관합니다 — 이미 있는 "최신" 파일은
+그대로 두고 추가로 스냅샷만 쌓는 방식이라 다른 단계에 영향이 없습니다.
+
+**5단계 — 여러 티커 요약 대시보드 (선택, 터미널)**
+
+여러 티커 리포트를 만든 뒤, 한 페이지로 모아보고 싶으면:
+
+```bash
+python summary_report.py
+```
+
+그 시점에 `reports/` 폴더에 있는 모든 티커를 스캔해 `reports/summary_report.html`을
+만듭니다 — 티커별 현재가/DCF 적정가/괴리율/핵심 해자 요약과 각 리포트로
+가는 링크, 그리고 최근 ROE vs P/E 산점도가 담깁니다. **이 스크립트는
+파이프라인을 실행하지 않습니다** — 이미 생성된 리포트를 모을 뿐입니다
+(해석 서브에이전트는 Claude Code 대화 세션에서만 동작하므로, 터미널
+스크립트 혼자서 자동 갱신할 수 없습니다).
+
+```bash
+python summary_report.py --check-stale
+```
+
+요약을 만드는 대신, 최근 실행이 30일 이상 지났거나 아예 없는 티커
+목록만 출력합니다. 이 채팅에서 "요약 리포트 만들어줘"라고 요청하면,
+먼저 이 명령으로 오래된 티커를 확인한 뒤 그 티커들만 골라 전체
+파이프라인(1~3단계)을 실행하고, 마지막에 요약을 생성하는 방식으로
+진행합니다.
+
+## 시계열 추세 (선택)
+
+```bash
+python -m quant.trend AAPL
+```
+
+`data/AAPL_trend.json`을 생성합니다 — 오늘 실행 결과를 **1~6개월 전**
+스냅샷(1개월 이내는 단기 노이즈로 보고 의도적으로 제외)과 비교해
+현재가/DCF 적정가/괴리율/Trailing P/E/ROE가 어떻게 바뀌었는지 숫자로
+계산합니다. 해당 기간 내 실행 이력이 없으면(처음 쓰거나, 6개월 넘게
+공백이 있었던 경우) `insufficient_data`로 남습니다 — 지어내지 않습니다.
+3단계 전에 실행해두면 `debate-synthesis-agent`와 `cfo-report-writer`가
+자동으로 읽어 리포트에 "시계열 추세" 섹션과 종합 요약의 추세 관찰을
+추가합니다.
 
 ## 테스트
 
@@ -209,3 +267,15 @@ pytest tests/
   의존하므로 검색 시점에 따라 결과가 달라질 수 있고, 최신이거나 완전한
   정보를 보장하지 않습니다. 두 에이전트 모두 사실관계·인용 위주로만
   작성하도록 지시되어 있으며, 승패 예측이나 투자 결론을 내리지 않습니다.
+- **시계열 추세**: 참조 시점은 "1~6개월 전 중 가장 최근" 스냅샷 하나만
+  씁니다 — 여러 시점을 잇는 차트나 다중 시점 비교는 아직 없습니다.
+  `python render_html.py`를 실행할 때마다 그날 스냅샷이 쌓이므로, 하루에
+  여러 번 실행해도 그날 폴더가 덮어써질 뿐 과거 스냅샷은 보존됩니다.
+  디스크 사용량은 실행 빈도에 비례해 계속 늘어나며, 별도 보관 기간(retention)
+  정책은 아직 없습니다.
+- **요약 대시보드**(`summary_report.py`): 완전 무인 자동화가 아닙니다 —
+  해석 서브에이전트가 Claude Code 세션 안에서만 동작하므로, 오래된 티커
+  갱신은 이 채팅에서 요청해야 진행됩니다. ROE vs P/E 차트는 matplotlib 등
+  외부 의존성 없이 직접 그린 SVG라, 값이 극단적으로 몰린 티커(예: P/E가
+  유난히 높은 종목)가 있으면 나머지 점들이 한쪽에 뭉쳐 보일 수 있고, 값이
+  가까운 티커끼리는 라벨이 겹칠 수 있습니다.

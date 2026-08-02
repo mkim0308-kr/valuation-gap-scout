@@ -13,6 +13,8 @@ from pathlib import Path
 
 import markdown
 
+from quant import archive
+
 REPORTS_DIR = Path(__file__).parent / "reports"
 
 DISCLAIMER_MARK = "⚠️"
@@ -166,6 +168,8 @@ def main() -> None:
         try:
             out_path = render_report_html(ticker)
             print(f"{ticker}: {out_path}")
+            archive_dest = archive.archive_run(ticker)
+            print(f"  -> 이력 저장 완료: {archive_dest}")
         except FileNotFoundError as exc:
             print(f"[오류] {exc}", file=sys.stderr)
 
