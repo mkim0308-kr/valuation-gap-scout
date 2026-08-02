@@ -83,6 +83,14 @@ debate-synthesis-agent를 실행해 종합 요약을 생성하세요"라고 안�
   FCF 기준값은 `5yr_quarterly_metrics`(최근 5년 분기 10-Q/10-K 데이터를
   트레일링 12개월로 롤업한 값)에서 가져옵니다. "10년 연간 FCF" 같은 예전
   표현을 쓰지 말고 "최근 5년 분기별(TTM 기준) FCF"로 서술하세요.
+  성장률 가정은 단일 상수가 아니라 **2단계(2-stage) 구조**입니다 —
+  `dcf_model_output.near_term_growth_rate_used`(1~2년차, 애널리스트 forward
+  추정치가 있으면 그걸 우선 사용하고 없으면 5년 분기 추세 성장률로 대체)로
+  시작해 `growth_rate_schedule`(연도별 실제 적용 성장률 배열)을 따라 5년차에는
+  터미널 성장률까지 선형으로 수렴합니다. `implied_growth_rate_analysis`의
+  `analyst_forward_growth_rate_pct`가 음수(예: 실적 둔화 컨센서스)면 그대로
+  반영되어 적정가가 낮게 나올 수 있다는 점도 자연스러운 결과이니 있는
+  그대로 서술하세요 — 억지로 긍정적으로 포장하지 마세요.
 * 📐 밸류에이션 방법 비교 (DCF 적정가 vs Graham Number vs 업계 배수(P/E,
   Forward P/E, EV/EBITDA, P/B, P/S) vs **잔여이익모델(Residual Income)
   적정가**(`residual_income_model_output`) — 수익성 지표(ROE, ROIC)도 표에

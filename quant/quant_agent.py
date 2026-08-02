@@ -26,7 +26,11 @@ def run_quant_agent(ticker: str) -> dict:
             f"{ticker}: found quarterly SEC filings but no 4 consecutive quarters "
             "to build a trailing-twelve-month FCF figure from."
         )
-    fcf_cagr = sec_data.compute_quarterly_cagr(ttm_fcf_series)
+    # Primary growth-rate figure: log-linear regression across the whole TTM
+    # series, less skewed by one outlier quarter than a 2-point comparison.
+    # The simple endpoint CAGR is also kept, for transparency/comparison.
+    fcf_cagr = sec_data.compute_ttm_trend_growth_rate(ttm_fcf_series)
+    simple_endpoint_cagr = sec_data.compute_quarterly_cagr(ttm_fcf_series)
     latest_ttm_quarter = max(ttm_fcf_series, key=lambda label: (label.split("-")[0], label.split("-")[1]))
     latest_fcf = ttm_fcf_series[latest_ttm_quarter]
 
@@ -42,6 +46,21 @@ def run_quant_agent(ticker: str) -> dict:
     )
     cost_of_equity = dcf.compute_cost_of_equity(risk_free_rate, capital["beta"])
 
+    # Computed before the DCF call below since the multi-stage DCF's
+    # near-term growth rate prefers the analyst forward estimate PEG already
+    # resolved (falling back to fcf_cagr itself when no estimate exists).
+    relative = relative_valuation.get_relative_valuation_metrics(
+        ticker,
+        latest_fcf=latest_fcf,
+        fcf_cagr=fcf_cagr,
+        shares_outstanding=capital["shares_outstanding"],
+        effective_tax_rate=capital["effective_tax_rate"],
+    )
+    near_term_growth_rate_pct = relative.get("peg_ratio", {}).get("growth_rate_pct_used")
+    near_term_growth_rate = (
+        near_term_growth_rate_pct / 100 if near_term_growth_rate_pct is not None else None
+    )
+
     # Reverse DCF: computed independently of whether the forward DCF below
     # succeeds — a large valuation_gap_pct (or even an insufficient_data
     # DCF, as can happen with a temporarily depressed base-year FCF) is
@@ -56,9 +75,9 @@ def run_quant_agent(ticker: str) -> dict:
 
     dcf_insufficient_data_reason = None
     try:
-        valuation = dcf.calculate_fair_value(
+        valuation = dcf.calculate_fair_value_multistage(
             latest_fcf=latest_fcf,
-            fcf_cagr=fcf_cagr,
+            near_term_growth_rate=near_term_growth_rate,
             wacc=wacc,
             total_debt=capital["total_debt"],
             shares_outstanding=capital["shares_outstanding"],
@@ -68,25 +87,18 @@ def run_quant_agent(ticker: str) -> dict:
         # A single anomalous base-year FCF (e.g. a temporary capex supercycle)
         # can push equity value negative — that's a real model limitation, not
         # a reason to fabricate a number, so we degrade to insufficient_data
-        # instead of crashing the whole pipeline (relative valuation below is
-        # still computed independently of the DCF base year).
+        # instead of crashing the whole pipeline (relative valuation above is
+        # computed independently of the DCF base year).
         dcf_insufficient_data_reason = str(e)
         valuation = {
-            "growth_rate_used": None,
+            "near_term_growth_rate_used": None,
+            "growth_rate_schedule": None,
             "projected_fcfs": None,
             "enterprise_value": None,
             "equity_value": None,
             "fair_value_per_share": None,
         }
         gap = None
-
-    relative = relative_valuation.get_relative_valuation_metrics(
-        ticker,
-        latest_fcf=latest_fcf,
-        fcf_cagr=fcf_cagr,
-        shares_outstanding=capital["shares_outstanding"],
-        effective_tax_rate=capital["effective_tax_rate"],
-    )
 
     residual_income_result = residual_income.get_residual_income_valuation(
         book_value_per_share=relative.get("book_value_per_share"),
@@ -110,6 +122,18 @@ def run_quant_agent(ticker: str) -> dict:
             "fcf_by_quarter": fcf_quarters,
             "ttm_fcf_by_quarter": ttm_fcf_series,
             "fcf_cagr": round(fcf_cagr, 5) if fcf_cagr is not None else None,
+            "fcf_cagr_method": (
+                "log-linear regression across the full TTM series "
+                "(compute_ttm_trend_growth_rate) — the primary growth-rate figure"
+            ),
+            "simple_endpoint_cagr": (
+                round(simple_endpoint_cagr, 5) if simple_endpoint_cagr is not None else None
+            ),
+            "simple_endpoint_cagr_method": (
+                "2-point CAGR between the oldest and newest TTM value only — kept "
+                "for comparison; more sensitive to a single outlier quarter at "
+                "either end than fcf_cagr"
+            ),
             "latest_ttm_fcf": latest_fcf,
             "latest_ttm_quarter": latest_ttm_quarter,
         },
@@ -120,6 +144,12 @@ def run_quant_agent(ticker: str) -> dict:
         "dcf_model_output": {
             "dynamic_wacc": wacc,
             "cost_of_equity_capm": round(cost_of_equity, 5),
+            "growth_methodology": (
+                "2-stage: years 1-2 hold near_term_growth_rate_used (analyst forward "
+                "estimate if available, else the 5yr quarterly trend CAGR), then "
+                "growth fades linearly to terminal_growth_rate by year 5 — see "
+                "growth_rate_schedule for the actual per-year rate used"
+            ),
             **valuation,
             "current_price": capital["current_price"],
             "valuation_gap_pct": gap,
