@@ -16,6 +16,7 @@ unchanged and still annual-only.
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 
@@ -236,9 +237,13 @@ def compute_ttm_series(quarterly_fcf: dict[str, float]) -> dict[str, float]:
 
 
 def compute_quarterly_cagr(ttm_series: dict[str, float]) -> float | None:
-    """Annualized growth rate between the oldest and newest TTM FCF value in
-    the series, based on elapsed quarters (n/4 years). None if fewer than 2
-    TTM points exist or either endpoint isn't positive."""
+    """Simple two-point annualized growth rate between the oldest and
+    newest TTM FCF value in the series, based on elapsed quarters (n/4
+    years). Kept as a secondary/auxiliary figure for comparison — since it
+    only looks at the two endpoints, an unusually high or low starting or
+    ending TTM point skews it more than compute_ttm_trend_growth_rate's
+    regression does. None if fewer than 2 TTM points exist or either
+    endpoint isn't positive."""
     if len(ttm_series) < 2:
         return None
 
@@ -259,6 +264,52 @@ def compute_quarterly_cagr(ttm_series: dict[str, float]) -> float | None:
         return None
     years = elapsed_quarters / 4
     return (end_val / start_val) ** (1 / years) - 1
+
+
+def compute_ttm_trend_growth_rate(ttm_series: dict[str, float]) -> float | None:
+    """Annualized growth rate from a log-linear (OLS) regression across the
+    *entire* TTM series, not just its two endpoints — the primary FCF
+    growth-rate figure used elsewhere in the pipeline (DCF's near-term
+    growth input, PEG's growth rate). Fits ln(TTM) = a + b*t (t in elapsed
+    years) and returns e^b - 1, so a single unusually high or low quarter
+    at either end doesn't dominate the estimate the way a 2-point CAGR
+    would — the same practical reason a trendline fits better than a
+    point-to-point comparison. Degrades gracefully to the same answer as
+    compute_quarterly_cagr when there are only 2 points (a line through 2
+    points has no other slope to find). None if fewer than 2 points, or any
+    TTM value isn't positive (can't take a log of a non-positive FCF)."""
+    if len(ttm_series) < 2:
+        return None
+
+    def parse(label: str) -> tuple[int, int]:
+        fy, fp = label.split("-")
+        return int(fy), int(fp[1])
+
+    ordered = sorted(ttm_series.keys(), key=parse)
+    values = [ttm_series[label] for label in ordered]
+    if any(v <= 0 for v in values):
+        return None
+
+    first_fy, first_q = parse(ordered[0])
+    xs = []
+    for label in ordered:
+        fy, q = parse(label)
+        elapsed_quarters = (fy - first_fy) * 4 + (q - first_q)
+        xs.append(elapsed_quarters / 4)
+    ys = [math.log(v) for v in values]
+
+    n = len(xs)
+    sum_x = sum(xs)
+    sum_y = sum(ys)
+    sum_xy = sum(x * y for x, y in zip(xs, ys))
+    sum_xx = sum(x * x for x in xs)
+
+    denom = n * sum_xx - sum_x**2
+    if denom == 0:  # all points at the same elapsed time — no slope to fit
+        return None
+    slope = (n * sum_xy - sum_x * sum_y) / denom
+
+    return math.exp(slope) - 1
 
 
 def compute_cagr(series: dict[int, float]) -> float | None:

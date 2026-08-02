@@ -6,6 +6,7 @@ from quant.sec_data import (
     compute_cagr,
     compute_quarterly_cagr,
     compute_ttm_series,
+    compute_ttm_trend_growth_rate,
 )
 
 
@@ -159,3 +160,37 @@ def test_compute_quarterly_cagr_needs_at_least_two_points():
 def test_compute_quarterly_cagr_rejects_non_positive_endpoints():
     assert compute_quarterly_cagr({"2024-Q4": -50.0, "2025-Q4": 100.0}) is None
     assert compute_quarterly_cagr({"2024-Q4": 50.0, "2025-Q4": -100.0}) is None
+
+
+def test_compute_ttm_trend_growth_rate_recovers_exact_rate_for_perfect_exponential_series():
+    # Perfectly exponential growth at 10%/yr -> regression recovers exactly 10%.
+    ttm = {"2023-Q4": 100.0, "2024-Q4": 110.0, "2025-Q4": 121.0}
+    assert compute_ttm_trend_growth_rate(ttm) == pytest.approx(0.10, rel=1e-6)
+
+
+def test_compute_ttm_trend_growth_rate_matches_two_point_cagr_with_only_two_points():
+    # A line through 2 points has no other slope to find, so the regression
+    # should degrade to exactly the same answer as the simple endpoint CAGR.
+    ttm = {"2024-Q4": 100.0, "2025-Q4": 110.0}
+    assert compute_ttm_trend_growth_rate(ttm) == pytest.approx(compute_quarterly_cagr(ttm), rel=1e-9)
+
+
+def test_compute_ttm_trend_growth_rate_less_skewed_by_a_late_outlier_than_endpoint_cagr():
+    # Flat for 3 years, then a sudden jump only at the very last point — the
+    # regression is pulled down by the 3 flat years and should land below
+    # what a naive first-vs-last 2-point CAGR would say.
+    ttm = {"2022-Q4": 100.0, "2023-Q4": 100.0, "2024-Q4": 100.0, "2025-Q4": 200.0}
+    trend_rate = compute_ttm_trend_growth_rate(ttm)
+    endpoint_rate = compute_quarterly_cagr(ttm)
+    assert trend_rate < endpoint_rate
+    assert trend_rate == pytest.approx(0.2311, abs=0.001)
+
+
+def test_compute_ttm_trend_growth_rate_needs_at_least_two_points():
+    assert compute_ttm_trend_growth_rate({"2024-Q4": 100.0}) is None
+    assert compute_ttm_trend_growth_rate({}) is None
+
+
+def test_compute_ttm_trend_growth_rate_rejects_non_positive_values():
+    assert compute_ttm_trend_growth_rate({"2024-Q4": -50.0, "2025-Q4": 100.0}) is None
+    assert compute_ttm_trend_growth_rate({"2024-Q4": 50.0, "2025-Q4": -100.0}) is None

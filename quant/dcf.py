@@ -107,6 +107,82 @@ def calculate_fair_value(
     }
 
 
+FADE_START_YEAR = 2  # years 1-2 hold near_term_growth_rate, then fade to terminal
+
+
+def calculate_fair_value_multistage(
+    latest_fcf: float,
+    near_term_growth_rate: float | None,
+    wacc: float,
+    total_debt: float,
+    shares_outstanding: float,
+    cash_and_equivalents: float = 0.0,
+    terminal_growth_rate: float = TERMINAL_GROWTH_RATE,
+    fade_start_year: int = FADE_START_YEAR,
+) -> dict:
+    """Two-stage DCF matching standard IB/fund-model practice more closely
+    than calculate_fair_value's flat single rate: years 1..fade_start_year
+    grow at near_term_growth_rate (the analyst forward estimate when one's
+    available, else the historical trend rate — quant_agent.py decides
+    which), then growth fades linearly, year by year, down to
+    terminal_growth_rate by the final projection year. This avoids the
+    "growth cliff" a constant-rate projection has between its last explicit
+    year and the Gordon-growth terminal value, since the final explicit
+    year's rate now already equals the terminal rate.
+
+    near_term_growth_rate is clamped the same way calculate_fair_value's
+    fcf_cagr is (MIN/MAX_GROWTH_RATE) — a noisy or missing input can't blow
+    up the model, and None falls back to TERMINAL_GROWTH_RATE via the same
+    _bounded_growth_rate helper.
+    """
+    if wacc <= terminal_growth_rate:
+        raise ValueError("WACC must exceed the terminal growth rate")
+    if shares_outstanding <= 0:
+        raise ValueError("shares_outstanding must be positive")
+    if not 1 <= fade_start_year <= PROJECTION_YEARS:
+        raise ValueError("fade_start_year must be between 1 and PROJECTION_YEARS")
+
+    near_rate = _bounded_growth_rate(near_term_growth_rate)
+
+    fade_years = PROJECTION_YEARS - fade_start_year
+    growth_schedule = []
+    for year in range(1, PROJECTION_YEARS + 1):
+        if year <= fade_start_year or fade_years == 0:
+            growth_schedule.append(near_rate)
+        else:
+            progress = (year - fade_start_year) / fade_years
+            growth_schedule.append(near_rate + (terminal_growth_rate - near_rate) * progress)
+
+    projected_fcfs = []
+    fcf = latest_fcf
+    for rate in growth_schedule:
+        fcf = fcf * (1 + rate)
+        projected_fcfs.append(fcf)
+
+    pv_fcfs = [
+        cf / ((1 + wacc) ** year)
+        for year, cf in enumerate(projected_fcfs, start=1)
+    ]
+
+    terminal_value = (
+        projected_fcfs[-1] * (1 + terminal_growth_rate) / (wacc - terminal_growth_rate)
+    )
+    pv_terminal_value = terminal_value / ((1 + wacc) ** PROJECTION_YEARS)
+
+    enterprise_value = sum(pv_fcfs) + pv_terminal_value
+    equity_value = enterprise_value - total_debt + cash_and_equivalents
+    fair_value_per_share = equity_value / shares_outstanding
+
+    return {
+        "near_term_growth_rate_used": round(near_rate, 5),
+        "growth_rate_schedule": [round(r, 5) for r in growth_schedule],
+        "projected_fcfs": [round(v, 2) for v in projected_fcfs],
+        "enterprise_value": round(enterprise_value, 2),
+        "equity_value": round(equity_value, 2),
+        "fair_value_per_share": round(fair_value_per_share, 2),
+    }
+
+
 def valuation_gap(current_price: float, fair_value_per_share: float) -> float:
     """Positive => current price trades at a premium to the DCF fair value.
     Negative => current price trades at a discount."""

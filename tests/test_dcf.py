@@ -2,6 +2,7 @@ import pytest
 
 from quant.dcf import (
     calculate_fair_value,
+    calculate_fair_value_multistage,
     calculate_implied_growth_rate,
     calculate_wacc,
     compute_cost_of_equity,
@@ -183,3 +184,127 @@ def test_calculate_implied_growth_rate_none_when_price_exceeds_search_bounds():
     )
     assert result["implied_growth_rate"] is None
     assert "불가능" in result["insufficient_data_reason"]
+
+
+def test_calculate_fair_value_multistage_zero_growth_reduces_to_perpetuity():
+    result = calculate_fair_value_multistage(
+        latest_fcf=100,
+        near_term_growth_rate=0.0,
+        wacc=0.10,
+        total_debt=0,
+        shares_outstanding=100,
+        cash_and_equivalents=0,
+        terminal_growth_rate=0.0,
+    )
+    assert result["enterprise_value"] == pytest.approx(1000.0, rel=1e-4)
+    assert result["fair_value_per_share"] == pytest.approx(10.0, rel=1e-4)
+    assert result["growth_rate_schedule"] == [pytest.approx(0.0)] * 5
+
+
+def test_calculate_fair_value_multistage_fades_growth_rate_to_terminal():
+    result = calculate_fair_value_multistage(
+        latest_fcf=100,
+        near_term_growth_rate=0.20,
+        wacc=0.15,
+        total_debt=0,
+        shares_outstanding=100,
+        terminal_growth_rate=0.025,
+        fade_start_year=2,
+    )
+    # abs=1e-5 to account for the source's round(r, 5) on each schedule entry
+    schedule = result["growth_rate_schedule"]
+    assert schedule[0] == pytest.approx(0.20, abs=1e-5)
+    assert schedule[1] == pytest.approx(0.20, abs=1e-5)
+    assert schedule[2] == pytest.approx(0.20 + (0.025 - 0.20) * (1 / 3), abs=1e-5)
+    assert schedule[3] == pytest.approx(0.20 + (0.025 - 0.20) * (2 / 3), abs=1e-5)
+    assert schedule[4] == pytest.approx(0.025, abs=1e-5)  # final year lands exactly on terminal
+
+
+def test_calculate_fair_value_multistage_no_fade_when_fade_start_at_horizon():
+    result = calculate_fair_value_multistage(
+        latest_fcf=100,
+        near_term_growth_rate=0.20,
+        wacc=0.15,
+        total_debt=0,
+        shares_outstanding=100,
+        terminal_growth_rate=0.025,
+        fade_start_year=5,
+    )
+    assert result["growth_rate_schedule"] == [pytest.approx(0.20)] * 5
+
+
+def test_calculate_fair_value_multistage_clamps_runaway_near_term_growth_rate():
+    exploded = calculate_fair_value_multistage(
+        latest_fcf=100,
+        near_term_growth_rate=5.0,  # 500% should be clamped to MAX_GROWTH_RATE
+        wacc=0.15,
+        total_debt=0,
+        shares_outstanding=100,
+        fade_start_year=5,
+    )
+    capped = calculate_fair_value_multistage(
+        latest_fcf=100,
+        near_term_growth_rate=0.30,
+        wacc=0.15,
+        total_debt=0,
+        shares_outstanding=100,
+        fade_start_year=5,
+    )
+    assert exploded["fair_value_per_share"] == pytest.approx(capped["fair_value_per_share"])
+
+
+def test_calculate_fair_value_multistage_none_growth_rate_falls_back_to_terminal():
+    result = calculate_fair_value_multistage(
+        latest_fcf=100,
+        near_term_growth_rate=None,
+        wacc=0.15,
+        total_debt=0,
+        shares_outstanding=100,
+        terminal_growth_rate=0.025,
+    )
+    assert result["near_term_growth_rate_used"] == pytest.approx(0.025)
+    assert all(r == pytest.approx(0.025) for r in result["growth_rate_schedule"])
+
+
+def test_calculate_fair_value_multistage_rejects_wacc_below_terminal_growth():
+    with pytest.raises(ValueError):
+        calculate_fair_value_multistage(
+            latest_fcf=100,
+            near_term_growth_rate=0.1,
+            wacc=0.02,
+            total_debt=0,
+            shares_outstanding=100,
+            terminal_growth_rate=0.025,
+        )
+
+
+def test_calculate_fair_value_multistage_rejects_non_positive_shares():
+    with pytest.raises(ValueError):
+        calculate_fair_value_multistage(
+            latest_fcf=100,
+            near_term_growth_rate=0.1,
+            wacc=0.1,
+            total_debt=0,
+            shares_outstanding=0,
+        )
+
+
+def test_calculate_fair_value_multistage_rejects_invalid_fade_start_year():
+    with pytest.raises(ValueError):
+        calculate_fair_value_multistage(
+            latest_fcf=100,
+            near_term_growth_rate=0.1,
+            wacc=0.1,
+            total_debt=0,
+            shares_outstanding=100,
+            fade_start_year=0,
+        )
+    with pytest.raises(ValueError):
+        calculate_fair_value_multistage(
+            latest_fcf=100,
+            near_term_growth_rate=0.1,
+            wacc=0.1,
+            total_debt=0,
+            shares_outstanding=100,
+            fade_start_year=6,
+        )
