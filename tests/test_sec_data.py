@@ -2,7 +2,9 @@ import pytest
 
 from quant.sec_data import (
     _derive_single_quarter_series,
+    _period_facts_from_concept,
     _period_values_from_concept,
+    _trim_and_label_quarters,
     compute_cagr,
     compute_quarterly_cagr,
     compute_ttm_series,
@@ -25,8 +27,8 @@ def test_compute_cagr_rejects_non_positive_endpoints():
     assert compute_cagr({2016: 50.0, 2026: -100.0}) is None
 
 
-def _fact(fy, fp, val, form="10-Q", filed="2024-01-01"):
-    return {"fy": fy, "fp": fp, "val": val, "form": form, "filed": filed}
+def _fact(fy, fp, val, form="10-Q", filed="2024-01-01", end=None):
+    return {"fy": fy, "fp": fp, "val": val, "form": form, "filed": filed, "end": end}
 
 
 def test_period_values_from_concept_extracts_quarterly_and_annual_facts():
@@ -69,6 +71,43 @@ def test_period_values_from_concept_keeps_latest_filed_on_restatement():
         }
     }
     assert _period_values_from_concept(concept) == {(2024, "Q1"): 11}
+
+
+def test_period_facts_from_concept_keeps_end_date_alongside_value():
+    concept = {
+        "units": {
+            "USD": [
+                _fact(2024, "Q1", 10, end="2024-03-31"),
+                _fact(2024, "FY", 100, form="10-K", end="2024-12-31"),
+            ]
+        }
+    }
+    assert _period_facts_from_concept(concept) == {
+        (2024, "Q1"): {"val": 10, "end": "2024-03-31"},
+        (2024, "FY"): {"val": 100, "end": "2024-12-31"},
+    }
+
+
+def test_trim_and_label_quarters_labels_and_orders_chronologically():
+    quarters = {(2024, "Q2"): 20.0, (2024, "Q1"): 10.0, (2025, "Q1"): 30.0}
+    assert _trim_and_label_quarters(quarters, lookback_years=5) == {
+        "2024-Q1": 10.0,
+        "2024-Q2": 20.0,
+        "2025-Q1": 30.0,
+    }
+
+
+def test_trim_and_label_quarters_drops_years_older_than_lookback():
+    quarters = {(2018, "Q1"): 1.0, (2024, "Q1"): 10.0, (2025, "Q1"): 30.0}
+    # max_fy=2025, lookback=5 -> cutoff_fy=2020, so 2018 is dropped (2018 <= 2020)
+    assert _trim_and_label_quarters(quarters, lookback_years=5) == {
+        "2024-Q1": 10.0,
+        "2025-Q1": 30.0,
+    }
+
+
+def test_trim_and_label_quarters_empty_input():
+    assert _trim_and_label_quarters({}, lookback_years=5) == {}
 
 
 def test_derive_single_quarter_series_differences_ytd_figures():

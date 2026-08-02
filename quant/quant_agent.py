@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from quant import dcf, market_data, relative_valuation, residual_income, sec_data
+from quant import dcf, market_data, quarterly_metrics, relative_valuation, residual_income, sec_data
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -107,6 +107,22 @@ def run_quant_agent(ticker: str) -> dict:
         current_price=capital["current_price"],
     )
 
+    # For the summary dashboard's interactive charts: ROE/P-E quarterly
+    # series (built the same way as FCF above), unioned with TTM FCF into
+    # one {quarter: {metric: value}} structure so the chart can plot any
+    # metric on either axis without the caller needing to know which
+    # module originally computed which figure.
+    roe_pe_series = quarterly_metrics.get_quarterly_roe_and_pe(
+        ticker, capital.get("shares_outstanding")
+    )
+    quarterly_timeseries: dict[str, dict[str, float]] = {}
+    for quarter, value in ttm_fcf_series.items():
+        quarterly_timeseries.setdefault(quarter, {})["fcf_ttm"] = value
+    for quarter, value in roe_pe_series["roe_by_quarter"].items():
+        quarterly_timeseries.setdefault(quarter, {})["roe_ttm"] = value
+    for quarter, value in roe_pe_series["pe_by_quarter"].items():
+        quarterly_timeseries.setdefault(quarter, {})["pe_ttm"] = value
+
     result = {
         "ticker": ticker,
         "as_of": datetime.now(timezone.utc).isoformat(),
@@ -173,6 +189,23 @@ def run_quant_agent(ticker: str) -> dict:
         },
         "residual_income_model_output": residual_income_result,
         "relative_valuation": relative,
+        "quarterly_timeseries": {
+            "metrics": quarterly_timeseries,
+            "metric_labels": {
+                "fcf_ttm": "FCF (TTM)",
+                "roe_ttm": "ROE (TTM)",
+                "pe_ttm": "P/E (TTM)",
+            },
+            "note": (
+                "Each quarter's value is trailing-twelve-month (TTM) as of that quarter's "
+                "end, not a single-quarter figure — smooths seasonality the same way the "
+                "primary FCF series does. pe_ttm approximates market cap using *today's* "
+                "share count for every historical quarter (SEC doesn't cleanly expose a "
+                "point-in-time historical diluted share count), least accurate for names "
+                "with heavy buyback/issuance activity. A quarter only appears for a given "
+                "metric if SEC/price data was actually available for it — never guessed."
+            ),
+        },
     }
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)

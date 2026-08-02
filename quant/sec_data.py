@@ -108,15 +108,18 @@ def get_annual_xbrl_series(ticker: str, tags: list[str]) -> dict[int, float]:
     return _first_available_series(cik, tags)
 
 
-def _period_values_from_concept(concept_json: dict) -> dict[tuple[int, str], float]:
-    """Collapse 10-Q/10-K duration facts into one value per (fiscal_year,
-    fiscal_period), fp in {Q1, Q2, Q3, FY}. 10-Q figures are YTD-cumulative
-    by SEC convention (Q1=3mo, Q2=6mo, Q3=9mo) — turning them into
-    single-quarter values happens in _derive_single_quarter_series. When a
-    later filing restates a prior period, keeps whichever fact was filed
-    most recently."""
+def _period_facts_from_concept(concept_json: dict) -> dict[tuple[int, str], dict]:
+    """Collapse 10-Q/10-K duration facts into one {"val", "end"} fact per
+    (fiscal_year, fiscal_period), fp in {Q1, Q2, Q3, FY}. 10-Q figures are
+    YTD-cumulative by SEC convention (Q1=3mo, Q2=6mo, Q3=9mo) — turning them
+    into single-quarter values happens in _derive_single_quarter_series;
+    point-in-time (balance-sheet) items are used as-is by
+    get_5yr_quarterly_snapshot_series. 'end' is kept because a caller may
+    need the actual calendar date a period ended on (e.g. to look up a
+    stock price as of that date). When a later filing restates a prior
+    period, keeps whichever fact was filed most recently."""
     latest_filed: dict[tuple[int, str], str] = {}
-    values: dict[tuple[int, str], float] = {}
+    facts: dict[tuple[int, str], dict] = {}
     for unit_facts in concept_json.get("units", {}).values():
         for fact in unit_facts:
             if fact.get("form") not in ("10-K", "10-K/A", "10-Q", "10-Q/A"):
@@ -129,8 +132,14 @@ def _period_values_from_concept(concept_json: dict) -> dict[tuple[int, str], flo
             filed = fact.get("filed", "")
             if key not in latest_filed or filed >= latest_filed[key]:
                 latest_filed[key] = filed
-                values[key] = fact["val"]
-    return values
+                facts[key] = {"val": fact["val"], "end": fact.get("end")}
+    return facts
+
+
+def _period_values_from_concept(concept_json: dict) -> dict[tuple[int, str], float]:
+    """Same as _period_facts_from_concept but just the value, for callers
+    that don't need the period end date."""
+    return {key: fact["val"] for key, fact in _period_facts_from_concept(concept_json).items()}
 
 
 def _derive_single_quarter_series(
@@ -198,16 +207,78 @@ def get_5yr_quarterly_fcf_series(
         if capex is not None:
             fcf_quarters[key] = ocf - abs(capex)
 
-    if not fcf_quarters:
-        return {}
+    return _trim_and_label_quarters(fcf_quarters, lookback_years)
 
-    max_fy = max(fy for fy, _ in fcf_quarters)
+
+def _trim_and_label_quarters(quarters: dict[tuple[int, str], object], lookback_years: int) -> dict:
+    """Shared tail end of every get_5yr_quarterly_*_series function: trim to
+    the trailing lookback_years and relabel (fy, fp) keys as "{fy}-{fp}"
+    strings, chronologically ordered."""
+    if not quarters:
+        return {}
+    max_fy = max(fy for fy, _ in quarters)
     cutoff_fy = max_fy - lookback_years
-    trimmed = {k: v for k, v in fcf_quarters.items() if k[0] > cutoff_fy}
+    trimmed = {k: v for k, v in quarters.items() if k[0] > cutoff_fy}
 
     quarter_order = {"Q1": 0, "Q2": 1, "Q3": 2, "Q4": 3}
     ordered_keys = sorted(trimmed.keys(), key=lambda k: (k[0], quarter_order[k[1]]))
     return {_quarter_label(fy, fp): trimmed[(fy, fp)] for fy, fp in ordered_keys}
+
+
+def get_5yr_quarterly_flow_series(
+    ticker: str, tags: list[str], lookback_years: int = QUARTERLY_LOOKBACK_YEARS
+) -> dict[str, float]:
+    """Generic single-line-item version of get_5yr_quarterly_fcf_series's
+    reconstruction, for any flow (income-statement/cash-flow) XBRL concept
+    reported YTD-cumulative in 10-Qs — e.g. NetIncomeLoss. Returns
+    {"{fiscal_year}-Q{n}": value} for the trailing lookback_years."""
+    cik = get_cik(ticker)
+    if not cik:
+        return {}
+    quarters = _merged_quarterly_series(cik, tags)
+    return _trim_and_label_quarters(quarters, lookback_years)
+
+
+def get_5yr_quarterly_snapshot_series(
+    ticker: str, tags: list[str], lookback_years: int = QUARTERLY_LOOKBACK_YEARS
+) -> dict[str, float]:
+    """Point-in-time series (e.g. StockholdersEquity, shares outstanding)
+    for the trailing lookback_years. Unlike get_5yr_quarterly_flow_series,
+    no YTD differencing — balance-sheet facts are already a snapshot as of
+    each period's end date. The 10-K's FY fact is relabeled Q4 (the fiscal
+    year-end snapshot), since SEC XBRL never reports fp='Q4' directly (no
+    10-Q is filed for Q4)."""
+    cik = get_cik(ticker)
+    if not cik:
+        return {}
+    merged: dict[tuple[int, str], float] = {}
+    for tag in tags:
+        concept = _get_xbrl_concept(cik, tag)
+        time.sleep(0.15)
+        if concept:
+            for (fy, fp), val in _period_values_from_concept(concept).items():
+                merged.setdefault((fy, "Q4" if fp == "FY" else fp), val)
+    return _trim_and_label_quarters(merged, lookback_years)
+
+
+def get_5yr_quarterly_snapshot_dates(
+    ticker: str, tags: list[str], lookback_years: int = QUARTERLY_LOOKBACK_YEARS
+) -> dict[str, str]:
+    """The calendar 'end' date for each quarter in
+    get_5yr_quarterly_snapshot_series's series (same tags/window) — e.g. so
+    a caller can look up the stock price as of each quarter's end date."""
+    cik = get_cik(ticker)
+    if not cik:
+        return {}
+    merged: dict[tuple[int, str], str] = {}
+    for tag in tags:
+        concept = _get_xbrl_concept(cik, tag)
+        time.sleep(0.15)
+        if concept:
+            for (fy, fp), fact in _period_facts_from_concept(concept).items():
+                if fact.get("end"):
+                    merged.setdefault((fy, "Q4" if fp == "FY" else fp), fact["end"])
+    return _trim_and_label_quarters(merged, lookback_years)
 
 
 def compute_ttm_series(quarterly_fcf: dict[str, float]) -> dict[str, float]:
