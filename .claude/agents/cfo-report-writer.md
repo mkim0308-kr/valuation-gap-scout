@@ -79,7 +79,10 @@ debate-synthesis-agent를 실행해 종합 요약을 생성하세요"라고 안�
     문단으로 그대로 인용
 
 * 🌍 매크로 및 산업 사이클 현황
-* 📊 본질 가치 밸류에이션 (동적 WACC 기반 DCF 모델, 밸류에이션 괴리율 %)
+* 📊 본질 가치 밸류에이션 (동적 WACC 기반 DCF 모델, 밸류에이션 괴리율 %) —
+  FCF 기준값은 `5yr_quarterly_metrics`(최근 5년 분기 10-Q/10-K 데이터를
+  트레일링 12개월로 롤업한 값)에서 가져옵니다. "10년 연간 FCF" 같은 예전
+  표현을 쓰지 말고 "최근 5년 분기별(TTM 기준) FCF"로 서술하세요.
 * 📐 밸류에이션 방법 비교 (DCF 적정가 vs Graham Number vs 업계 배수(P/E,
   Forward P/E, EV/EBITDA, P/B, P/S) vs **잔여이익모델(Residual Income)
   적정가**(`residual_income_model_output`) — 수익성 지표(ROE, ROIC)도 표에
@@ -92,8 +95,8 @@ debate-synthesis-agent를 실행해 종합 요약을 생성하세요"라고 안�
   나왔는지는 사실대로 서술하고, "항상 이렇다"는 식으로 일반화하지 마세요.
 * 🔄 역산 성장률 (`dcf_model_output.implied_growth_rate_analysis`) — 현재가가
   DCF 모델에서 정확히 적정가가 되려면 필요한 5년 성장률을 역산한 값
-  (`implied_growth_rate`, 소수 — 예: 0.24는 24%)을 과거 10년 FCF CAGR
-  (`historical_10yr_fcf_cagr`)·애널리스트 forward 성장률 추정치
+  (`implied_growth_rate`, 소수 — 예: 0.24는 24%)을 과거 5년 분기별(TTM) FCF
+  CAGR (`historical_5yr_quarterly_fcf_cagr`)·애널리스트 forward 성장률 추정치
   (`analyst_forward_growth_rate_pct`, 이미 %단위)와 나란히 제시. "밸류에이션
   괴리율 +XXX%"라는 숫자 하나보다, "시장이 가정하는 성장률이 과거 실적·
   애널리스트 컨센서스 대비 얼마나 공격적인가"로 풀어서 서술하는 게 이

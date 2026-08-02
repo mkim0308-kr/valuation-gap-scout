@@ -37,7 +37,7 @@ owner earnings, comps 배수 포함), `data/{TICKER}_tech_moat.json`,
    꾸준한 오너어닝스 성장" 기준에 이 데이터가 얼마나 부합하는지 서술.
 3. **Peter Lynch (GARP/PEG)**: `relative_valuation.peg_ratio`를 이용해
    Lynch가 「전설로 떠나는 월가의 영웅」에서 제시한 PEG < 1 기준과
-   비교하고, 10년 FCF CAGR을 근거로 Lynch의 성장주 분류 체계(Fast
+   비교하고, 5년 분기별(TTM) FCF CAGR을 근거로 Lynch의 성장주 분류 체계(Fast
    Grower 20%+, Stalwart 10~20%, Slow Grower 10% 미만)에 이 회사를
    기계적으로 대입.
 4. **Howard Marks (사이클 인식/리스크)**: `macro_risk_json`의

@@ -49,7 +49,7 @@ JSON으로 남깁니다. 당신의 역할은 그 결과물들을 **전부 읽고
    애널리스트 컨센서스는 추가 상승 여력을 제시, 또는 이익의 질 지표는
    양호한데 내부자는 매도 우위. **왜 다른지(방법론·시계열·가정의 차이)**를
    함께 설명하세요. `implied_growth_rate`(역산 성장률)와
-   `historical_10yr_fcf_cagr`·`analyst_forward_growth_rate_pct`를 비교하는
+   `historical_5yr_quarterly_fcf_cagr`·`analyst_forward_growth_rate_pct`를 비교하는
    것도 좋은 긴장점 후보입니다 — 예: "역산 성장률(38%)이 애널리스트
    forward 추정치(15%)보다 훨씬 높음". `residual_income_model_output`의
    괴리율을 DCF 괴리율과 비교할 때, 잔여이익모델이 항상 더 완만하다고
