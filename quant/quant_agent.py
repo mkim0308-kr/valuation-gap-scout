@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from quant import dcf, market_data, relative_valuation, sec_data
+from quant import dcf, market_data, relative_valuation, residual_income, sec_data
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -33,6 +33,19 @@ def run_quant_agent(ticker: str) -> dict:
         beta=capital["beta"],
         risk_free_rate=risk_free_rate,
         effective_tax_rate=capital["effective_tax_rate"],
+    )
+    cost_of_equity = dcf.compute_cost_of_equity(risk_free_rate, capital["beta"])
+
+    # Reverse DCF: computed independently of whether the forward DCF below
+    # succeeds — a large valuation_gap_pct (or even an insufficient_data
+    # DCF, as can happen with a temporarily depressed base-year FCF) is
+    # easier to reason about as "what growth rate would this price imply?"
+    implied_growth = dcf.calculate_implied_growth_rate(
+        current_price=capital["current_price"],
+        latest_fcf=latest_fcf,
+        wacc=wacc,
+        total_debt=capital["total_debt"],
+        shares_outstanding=capital["shares_outstanding"],
     )
 
     dcf_insufficient_data_reason = None
@@ -69,6 +82,13 @@ def run_quant_agent(ticker: str) -> dict:
         effective_tax_rate=capital["effective_tax_rate"],
     )
 
+    residual_income_result = residual_income.get_residual_income_valuation(
+        book_value_per_share=relative.get("book_value_per_share"),
+        roe=relative.get("profitability", {}).get("return_on_equity"),
+        cost_of_equity=cost_of_equity,
+        current_price=capital["current_price"],
+    )
+
     result = {
         "ticker": ticker,
         "as_of": datetime.now(timezone.utc).isoformat(),
@@ -88,11 +108,29 @@ def run_quant_agent(ticker: str) -> dict:
         "capital_structure": capital,
         "dcf_model_output": {
             "dynamic_wacc": wacc,
+            "cost_of_equity_capm": round(cost_of_equity, 5),
             **valuation,
             "current_price": capital["current_price"],
             "valuation_gap_pct": gap,
             "insufficient_data_reason": dcf_insufficient_data_reason,
+            "implied_growth_rate_analysis": {
+                **implied_growth,
+                "note": (
+                    "implied_growth_rate는 현재가가 이 DCF 모델에서 정확히 적정가가 되도록 "
+                    "역산한 5년 성장률(소수, 예: 0.24=24%). historical_10yr_fcf_cagr, "
+                    "analyst_forward_growth_rate_pct와 비교해 시장이 가정하는 성장률이 "
+                    "과거 실적·애널리스트 컨센서스 대비 합리적인 수준인지 판단하는 데 씁니다."
+                ),
+                "historical_10yr_fcf_cagr": round(fcf_cagr, 5) if fcf_cagr is not None else None,
+                "analyst_forward_growth_rate_pct": relative.get("peg_ratio", {}).get(
+                    "growth_rate_pct_used"
+                ),
+                "analyst_forward_growth_rate_source": relative.get("peg_ratio", {}).get(
+                    "growth_rate_source"
+                ),
+            },
         },
+        "residual_income_model_output": residual_income_result,
         "relative_valuation": relative,
     }
 

@@ -20,9 +20,11 @@ python main.py TICKER
 └── [Agent 1] quant/quant_agent.py      하드 데이터만 다룸 (LLM 없음)
       ├── quant/sec_data.py             SEC EDGAR XBRL: 10년 영업현금흐름/CapEx
       ├── quant/market_data.py          yfinance: 국채금리, 베타, 시가총액, 부채
-      ├── quant/dcf.py                  동적 WACC 계산 + 5년 DCF 적정주가
+      ├── quant/dcf.py                  동적 WACC 계산 + 5년 DCF 적정주가 + 역산 성장률(implied growth rate)
+      ├── quant/residual_income.py      잔여이익모델(Residual Income) 적정가 — DCF와 독립적인 두 번째 기준점
       └── quant/relative_valuation.py   Graham Number, PEG, ROE, ROIC, PSR, comps 배수, 오너어닝스
-      -> data/{TICKER}_quant.json 저장 (relative_valuation 필드 포함)
+      -> data/{TICKER}_quant.json 저장 (relative_valuation, residual_income_model_output,
+         dcf_model_output.implied_growth_rate_analysis 필드 포함)
 
 python extended_metrics.py TICKER [--peers ...]   (선택, LLM 없음, 11개 모듈)
 ├── quant/peer_comps.py             피어 그룹 대비 배수/ROE 비교
@@ -273,6 +275,22 @@ pytest tests/
   여러 번 실행해도 그날 폴더가 덮어써질 뿐 과거 스냅샷은 보존됩니다.
   디스크 사용량은 실행 빈도에 비례해 계속 늘어나며, 별도 보관 기간(retention)
   정책은 아직 없습니다.
+- **역산 성장률(Implied Growth Rate)**: DCF와 같은 모델·같은 가정(WACC,
+  터미널성장률)을 그대로 쓰고, 최신 1개년 FCF를 기준으로 5년치 성장률만
+  역산합니다. 즉 DCF 자체의 한계(단일 기준연도 민감성 등)를 그대로
+  물려받습니다 — DCF와 독립적인 검증 수단이 아니라, DCF 결과를 "괴리율 %"
+  대신 "성장률 가정"으로 바꿔서 더 직관적으로 보여주는 재구성입니다.
+  탐색 범위(-50%~300%)를 벗어나면 `insufficient_data_reason`으로 남깁니다.
+- **잔여이익모델(Residual Income Model)**: 장부가치·현재 ROE·자기자본비용만
+  쓰는 단일단계(영구성장) 버전이라, 복리 성장 투영이 없어 DCF보다 대체로
+  덜 극단적인 결과를 내는 경향이 있습니다. 하지만 **항상 그런 건
+  아닙니다** — 현재 ROE가 자기자본비용보다 낮은 회사(예: 고베타로
+  자기자본비용 자체가 높은 종목)는 장부가치 기준 적정가가 오히려 크게
+  눌려서, DCF보다 더 극단적인 괴리율이 나올 수 있습니다(실제 확인:
+  TSLA는 현재 ROE 4.7% < 자기자본비용 14.7%라 잔여이익모델 괴리율이 DCF
+  괴리율보다 더 큽니다). 또한 ROE를 최근 1개년 스냅샷만 쓰고 여러 해
+  평균이나 정상화 없이 그대로 반영하므로, 일회성 요인으로 왜곡된 연도라면
+  결과도 함께 왜곡됩니다.
 - **요약 대시보드**(`summary_report.py`): 완전 무인 자동화가 아닙니다 —
   해석 서브에이전트가 Claude Code 세션 안에서만 동작하므로, 오래된 티커
   갱신은 이 채팅에서 요청해야 진행됩니다. ROE vs P/E 차트는 matplotlib 등
