@@ -1,9 +1,17 @@
 """Aggregates every ticker currently in reports/ into one dashboard page:
 reports/summary_report.html — a table with links to each ticker's full
-report, plus a most-recent ROE vs P/E scatter chart. Reads only what's
-already on disk; never runs the pipeline itself (that stays a deliberate,
-manual — or Claude-Code-orchestrated — step, since the interpretive agents
-can't run headlessly without reintroducing API billing).
+report, plus two interactive charts (X-Y scatter and time-trend) driven by
+quarterly_timeseries data from each ticker's data/{TICKER}_quant.json.
+Reads only what's already on disk; never runs the pipeline itself (that
+stays a deliberate, manual — or Claude-Code-orchestrated — step, since the
+interpretive agents can't run headlessly without reintroducing API
+billing).
+
+The two charts need actual interactivity (axis/ticker dropdowns that
+re-plot without a server round-trip), which isn't possible in pure static
+SVG — this page embeds a small amount of inline vanilla JS to do that. No
+external CDN, no framework, no build step; still a single self-contained
+file, just no longer a *script-free* one like render_html.py's reports.
 
     python summary_report.py                 # build reports/summary_report.html
     python summary_report.py --check-stale    # just list tickers not run in 30+ days
@@ -20,6 +28,15 @@ from quant import archive
 
 DATA_DIR = Path(__file__).parent / "data"
 REPORTS_DIR = Path(__file__).parent / "reports"
+
+# Kept in sync with quant_agent.py's quarterly_timeseries.metric_labels —
+# duplicated here (rather than read from one ticker's file) since every
+# ticker's quant.json defines the same fixed set of metrics.
+METRIC_LABELS = {
+    "fcf_ttm": "FCF (TTM)",
+    "roe_ttm": "ROE (TTM)",
+    "pe_ttm": "P/E (TTM)",
+}
 
 CSS = """
 :root {
@@ -77,13 +94,44 @@ table.summary-table { width: 100%; min-width: 720px; border-collapse: collapse; 
   font-size: 0.85rem;
 }
 
-.chart-wrap { max-width: 640px; }
-.roe-pe-chart { width: 100%; height: auto; }
+.chart-wrap { max-width: 760px; }
+.interactive-chart { width: 100%; height: auto; }
 .chart-grid { stroke: var(--border); stroke-width: 1; }
 .chart-tick { fill: var(--muted); font-size: 11px; }
 .chart-axis-title { fill: var(--muted); font-size: 12px; }
-.chart-dot { fill: var(--accent); stroke: var(--bg); stroke-width: 1.5; }
-.chart-label { fill: var(--fg); font-size: 11px; font-weight: 600; }
+.chart-label { font-size: 11px; font-weight: 600; }
+.chart-empty-note { color: var(--muted); font-size: 0.9rem; padding: 16px 0; }
+
+.chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.chart-controls .control-group { display: flex; flex-direction: column; gap: 4px; }
+.chart-controls label.control-title { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
+.chart-controls select {
+  font-size: 0.88rem;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+.ticker-checkboxes { display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: 420px; }
+.ticker-checkboxes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.ticker-checkboxes input { cursor: pointer; }
 """
 
 PAGE_TEMPLATE = """<!doctype html>
@@ -102,14 +150,64 @@ PAGE_TEMPLATE = """<!doctype html>
 <p class="subtitle">{generated_at} 기준 · {ticker_count}개 티커 · 각 항목 클릭 시 개별 리포트로 이동</p>
 <h2>티커별 요약</h2>
 {table}
-<h2>최근 ROE vs P/E</h2>
-<div class="chart-wrap">
-{chart}
+
+<h2>분기별 지표 산점도 (X-Y)</h2>
+<p class="muted" style="font-size:0.85rem; margin-top:-8px;">
+각 티커가 보유한 모든 분기의 (X, Y) 값을 점으로 표시하고, 시간 순서대로 얇은 선으로 연결합니다.
+가장 최근 분기는 큰 점으로 강조됩니다. 점에 마우스를 올리면 정확한 값을 볼 수 있습니다.
+</p>
+<div class="chart-controls" id="scatter-controls">
+  <div class="control-group">
+    <label class="control-title" for="scatter-x">X축 지표</label>
+    <select id="scatter-x">{scatter_x_options}</select>
+  </div>
+  <div class="control-group">
+    <label class="control-title" for="scatter-y">Y축 지표</label>
+    <select id="scatter-y">{scatter_y_options}</select>
+  </div>
+  <div class="control-group">
+    <label class="control-title">티커</label>
+    <div class="ticker-checkboxes">{scatter_ticker_checkboxes}</div>
+  </div>
 </div>
-<p class="muted" style="margin-top:32px; font-size:0.85rem;">
-⚠️ 본 페이지는 정보 제공 목적의 정량적 밸류에이션 요약이며, 투자 자문이나 매수/매도 추천이 아닙니다.
+<div class="chart-wrap">
+<svg id="scatter-svg" class="interactive-chart" role="img" aria-label="분기별 지표 산점도"></svg>
+<p class="chart-empty-note" id="scatter-empty-note" style="display:none;">
+선택된 티커·지표 조합에 데이터가 없습니다.
 </p>
 </div>
+
+<h2>분기별 지표 시계열 추세</h2>
+<p class="muted" style="font-size:0.85rem; margin-top:-8px;">
+X축은 분기, Y축은 선택한 지표입니다. 각 티커가 보유한 모든 분기 데이터를 선으로 이어 표시합니다.
+</p>
+<div class="chart-controls" id="trend-controls">
+  <div class="control-group">
+    <label class="control-title" for="trend-y">Y축 지표</label>
+    <select id="trend-y">{trend_y_options}</select>
+  </div>
+  <div class="control-group">
+    <label class="control-title">티커</label>
+    <div class="ticker-checkboxes">{trend_ticker_checkboxes}</div>
+  </div>
+</div>
+<div class="chart-wrap">
+<svg id="trend-svg" class="interactive-chart" role="img" aria-label="분기별 지표 시계열 추세"></svg>
+<p class="chart-empty-note" id="trend-empty-note" style="display:none;">
+선택된 티커·지표 조합에 데이터가 없습니다.
+</p>
+</div>
+
+<p class="muted" style="margin-top:32px; font-size:0.85rem;">
+⚠️ 본 페이지는 정보 제공 목적의 정량적 밸류에이션 요약이며, 투자 자문이나 매수/매도 추천이 아닙니다.
+분기 지표(FCF/ROE/P·E)는 모두 트레일링 12개월(TTM) 기준이며, P/E는 각 분기 시점의 실제 발행주식수가
+아니라 현재 발행주식수로 근사한 값이라 자사주매입·증자가 많았던 종목은 과거 구간의 정확도가 떨어질 수
+있습니다.
+</p>
+</div>
+<script>
+{chart_js}
+</script>
 </body>
 </html>
 """
@@ -191,97 +289,281 @@ def _build_table_html(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_roe_pe_scatter_svg(points: list[dict], width: int = 640, height: int = 420) -> str:
-    """points: [{"ticker": str, "pe": float, "roe": float}, ...], both
-    already filtered to non-None, positive P/E. Hand-rolled SVG (no
-    matplotlib dependency) so the page stays a single self-contained file."""
-    if not points:
-        return '<p class="muted">ROE·P/E 데이터가 모두 있는 티커가 없어 차트를 그릴 수 없습니다.</p>'
+def _collect_quarterly_timeseries(tickers: list[str]) -> dict[str, dict[str, dict[str, float]]]:
+    """{ticker: {quarter_label: {metric_key: value}}} for every ticker that
+    has a data/{TICKER}_quant.json with a quarterly_timeseries section.
+    Tickers with none (e.g. SPCX — no SEC 10-K/10-Q history) are simply
+    absent, not fabricated as empty series."""
+    result: dict[str, dict[str, dict[str, float]]] = {}
+    for ticker in tickers:
+        quant_path = DATA_DIR / f"{ticker}_quant.json"
+        if not quant_path.exists():
+            continue
+        quant = json.loads(quant_path.read_text())
+        metrics = quant.get("quarterly_timeseries", {}).get("metrics")
+        if metrics:
+            result[ticker] = metrics
+    return result
 
-    margin = {"top": 20, "right": 20, "bottom": 44, "left": 56}
-    plot_w = width - margin["left"] - margin["right"]
-    plot_h = height - margin["top"] - margin["bottom"]
 
-    pes = [p["pe"] for p in points]
-    roes = [p["roe"] for p in points]
-    pe_min, pe_max = min(pes), max(pes)
-    roe_min, roe_max = min(roes), max(roes)
-    pe_pad = (pe_max - pe_min) * 0.15 or max(pe_max, 1) * 0.15
-    roe_pad = (roe_max - roe_min) * 0.15 or 0.02
-    pe_lo, pe_hi = pe_min - pe_pad, pe_max + pe_pad
-    roe_lo, roe_hi = roe_min - roe_pad, roe_max + roe_pad
-    # P/E padding shouldn't manufacture a negative axis floor when every
-    # actual data point is non-negative (an outlier like a 280x P/E just
-    # needs a wide axis, not a fake negative P/E gridline).
-    if pe_min >= 0:
-        pe_lo = max(pe_lo, 0)
+def _build_metric_options(default: str) -> str:
+    options = []
+    for key, label in METRIC_LABELS.items():
+        selected = " selected" if key == default else ""
+        options.append(f'<option value="{key}"{selected}>{label}</option>')
+    return "".join(options)
 
-    def x_pos(pe: float) -> float:
-        return margin["left"] + (pe - pe_lo) / (pe_hi - pe_lo) * plot_w
 
-    def y_pos(roe: float) -> float:
-        return margin["top"] + (1 - (roe - roe_lo) / (roe_hi - roe_lo)) * plot_h
-
-    n_ticks = 5
-    grid = []
-    for i in range(n_ticks + 1):
-        gx = margin["left"] + plot_w * i / n_ticks
-        pe_val = pe_lo + (pe_hi - pe_lo) * i / n_ticks
-        grid.append(
-            f'<line x1="{gx:.1f}" y1="{margin["top"]}" x2="{gx:.1f}" '
-            f'y2="{margin["top"] + plot_h}" class="chart-grid" />'
-            f'<text x="{gx:.1f}" y="{margin["top"] + plot_h + 18}" class="chart-tick" '
-            f'text-anchor="middle">{pe_val:.0f}</text>'
+def _build_ticker_checkboxes(tickers: list[str], name: str) -> str:
+    boxes = []
+    for ticker in tickers:
+        boxes.append(
+            f'<label><input type="checkbox" name="{name}" value="{ticker}" checked> {ticker}</label>'
         )
-        gy = margin["top"] + plot_h * i / n_ticks
-        roe_val = roe_hi - (roe_hi - roe_lo) * i / n_ticks
-        grid.append(
-            f'<line x1="{margin["left"]}" y1="{gy:.1f}" '
-            f'x2="{margin["left"] + plot_w}" y2="{gy:.1f}" class="chart-grid" />'
-            f'<text x="{margin["left"] - 8}" y="{gy + 4:.1f}" class="chart-tick" '
-            f'text-anchor="end">{roe_val * 100:.0f}%</text>'
-        )
+    return "".join(boxes)
 
-    dots = []
-    for p in points:
-        cx, cy = x_pos(p["pe"]), y_pos(p["roe"])
-        dots.append(
-            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" class="chart-dot" />'
-            f'<text x="{cx:.1f}" y="{cy - 10:.1f}" class="chart-label" '
-            f'text-anchor="middle">{p["ticker"]}</text>'
-        )
 
-    axis_y_label_y = margin["top"] + plot_h / 2
-    return (
-        f'<svg viewBox="0 0 {width} {height}" class="roe-pe-chart" role="img" '
-        f'aria-label="ROE vs P/E 산점도">'
-        f'{"".join(grid)}'
-        f'<text x="{margin["left"] + plot_w / 2:.1f}" y="{height - 6}" '
-        f'class="chart-axis-title" text-anchor="middle">Trailing P/E</text>'
-        f'<text x="14" y="{axis_y_label_y:.1f}" class="chart-axis-title" text-anchor="middle" '
-        f'transform="rotate(-90 14 {axis_y_label_y:.1f})">ROE</text>'
-        f'{"".join(dots)}'
-        f"</svg>"
-    )
+def _build_chart_js(chart_data: dict, tickers: list[str]) -> str:
+    """Inline vanilla JS (no CDN, no framework) that renders both
+    interactive charts into their <svg> containers and re-renders on any
+    dropdown/checkbox change. See render_scatter/render_trend for the SVG
+    generation logic, mirrored from the project's earlier hand-rolled
+    Python SVG chart (same axis-scaling approach, just executed
+    client-side so it can respond to control changes)."""
+    return f"""
+const CHART_DATA = {json.dumps(chart_data)};
+const METRIC_LABELS = {json.dumps(METRIC_LABELS)};
+const TICKERS = {json.dumps(tickers)};
+const COLORS = ["#2f6fed","#e0663d","#2ea043","#c9366f","#9457eb","#c9a227","#12a594","#e85d75","#5c6bc0","#8d6e63"];
+
+function colorFor(ticker) {{
+  return COLORS[TICKERS.indexOf(ticker) % COLORS.length];
+}}
+
+function niceRange(values) {{
+  const min = Math.min.apply(null, values);
+  const max = Math.max.apply(null, values);
+  const pad = (max - min) * 0.12 || Math.abs(max || 1) * 0.12 || 1;
+  let lo = min - pad;
+  const hi = max + pad;
+  // Padding shouldn't manufacture a negative axis floor when every actual
+  // value is non-negative (e.g. an outlier P/E just needs a wide axis, not
+  // a fake negative gridline) — metrics that can genuinely go negative
+  // (ROE, FCF) are unaffected since min < 0 skips this clamp.
+  if (min >= 0) lo = Math.max(lo, 0);
+  return [lo, hi];
+}}
+
+function fmt(v) {{
+  return Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2);
+}}
+
+function selectedTickers(name) {{
+  return Array.prototype.slice.call(document.querySelectorAll('input[name="' + name + '"]:checked'))
+    .map(function(el) {{ return el.value; }});
+}}
+
+function renderScatter(svg, points, xLabel, yLabel) {{
+  const width = 720, height = 440;
+  const margin = {{top: 20, right: 20, bottom: 46, left: 62}};
+  const plotW = width - margin.left - margin.right;
+  const plotH = height - margin.top - margin.bottom;
+
+  const xs = points.map(function(p) {{ return p.x; }});
+  const ys = points.map(function(p) {{ return p.y; }});
+  const xr = niceRange(xs), yr = niceRange(ys);
+  const xlo = xr[0], xhi = xr[1], ylo = yr[0], yhi = yr[1];
+
+  function xPos(x) {{ return margin.left + (x - xlo) / (xhi - xlo) * plotW; }}
+  function yPos(y) {{ return margin.top + (1 - (y - ylo) / (yhi - ylo)) * plotH; }}
+
+  let out = "";
+  const nTicks = 5;
+  for (let i = 0; i <= nTicks; i++) {{
+    const gx = margin.left + plotW * i / nTicks;
+    const xVal = xlo + (xhi - xlo) * i / nTicks;
+    out += '<line x1="' + gx.toFixed(1) + '" y1="' + margin.top + '" x2="' + gx.toFixed(1) + '" y2="' + (margin.top + plotH) + '" class="chart-grid" />';
+    out += '<text x="' + gx.toFixed(1) + '" y="' + (margin.top + plotH + 18) + '" class="chart-tick" text-anchor="middle">' + fmt(xVal) + '</text>';
+    const gy = margin.top + plotH * i / nTicks;
+    const yVal = yhi - (yhi - ylo) * i / nTicks;
+    out += '<line x1="' + margin.left + '" y1="' + gy.toFixed(1) + '" x2="' + (margin.left + plotW) + '" y2="' + gy.toFixed(1) + '" class="chart-grid" />';
+    out += '<text x="' + (margin.left - 8) + '" y="' + (gy + 4).toFixed(1) + '" class="chart-tick" text-anchor="end">' + fmt(yVal) + '</text>';
+  }}
+
+  const byTicker = {{}};
+  points.forEach(function(p) {{ (byTicker[p.ticker] = byTicker[p.ticker] || []).push(p); }});
+  Object.keys(byTicker).forEach(function(ticker) {{
+    const pts = byTicker[ticker].sort(function(a, b) {{ return a.quarter < b.quarter ? -1 : 1; }});
+    const color = colorFor(ticker);
+    let path = "";
+    pts.forEach(function(p, i) {{
+      path += (i === 0 ? "M" : "L") + xPos(p.x).toFixed(1) + "," + yPos(p.y).toFixed(1) + " ";
+    }});
+    out += '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="1" opacity="0.45" />';
+    pts.forEach(function(p, i) {{
+      const isLast = i === pts.length - 1;
+      out += '<circle cx="' + xPos(p.x).toFixed(1) + '" cy="' + yPos(p.y).toFixed(1) + '" r="' + (isLast ? 5 : 3) +
+        '" fill="' + color + '" opacity="' + (isLast ? 1 : 0.55) + '"><title>' + p.ticker + ' ' + p.quarter + ': (' + fmt(p.x) + ', ' + fmt(p.y) + ')</title></circle>';
+    }});
+    const last = pts[pts.length - 1];
+    out += '<text x="' + xPos(last.x).toFixed(1) + '" y="' + (yPos(last.y) - 10).toFixed(1) + '" class="chart-label" text-anchor="middle" fill="' + color + '">' + ticker + '</text>';
+  }});
+
+  out += '<text x="' + (margin.left + plotW / 2).toFixed(1) + '" y="' + (height - 6) + '" class="chart-axis-title" text-anchor="middle">' + xLabel + '</text>';
+  const ylabY = margin.top + plotH / 2;
+  out += '<text x="14" y="' + ylabY.toFixed(1) + '" class="chart-axis-title" text-anchor="middle" transform="rotate(-90 14 ' + ylabY.toFixed(1) + ')">' + yLabel + '</text>';
+
+  svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+  svg.innerHTML = out;
+}}
+
+function renderTrend(svg, seriesByTicker, allQuarters, yLabel) {{
+  const width = 760, height = 440;
+  const margin = {{top: 20, right: 20, bottom: 60, left: 62}};
+  const plotW = width - margin.left - margin.right;
+  const plotH = height - margin.top - margin.bottom;
+
+  const allValues = [];
+  Object.keys(seriesByTicker).forEach(function(t) {{
+    Object.keys(seriesByTicker[t]).forEach(function(q) {{ allValues.push(seriesByTicker[t][q]); }});
+  }});
+  const yr = niceRange(allValues);
+  const ylo = yr[0], yhi = yr[1];
+
+  function xPos(idx) {{
+    return allQuarters.length <= 1 ? margin.left + plotW / 2 : margin.left + plotW * idx / (allQuarters.length - 1);
+  }}
+  function yPos(y) {{ return margin.top + (1 - (y - ylo) / (yhi - ylo)) * plotH; }}
+
+  let out = "";
+  const nTicks = 5;
+  for (let i = 0; i <= nTicks; i++) {{
+    const gy = margin.top + plotH * i / nTicks;
+    const yVal = yhi - (yhi - ylo) * i / nTicks;
+    out += '<line x1="' + margin.left + '" y1="' + gy.toFixed(1) + '" x2="' + (margin.left + plotW) + '" y2="' + gy.toFixed(1) + '" class="chart-grid" />';
+    out += '<text x="' + (margin.left - 8) + '" y="' + (gy + 4).toFixed(1) + '" class="chart-tick" text-anchor="end">' + fmt(yVal) + '</text>';
+  }}
+  const xLabelStep = Math.max(1, Math.ceil(allQuarters.length / 9));
+  allQuarters.forEach(function(q, i) {{
+    if (i % xLabelStep === 0 || i === allQuarters.length - 1) {{
+      out += '<text x="' + xPos(i).toFixed(1) + '" y="' + (margin.top + plotH + 20) + '" class="chart-tick" text-anchor="middle" transform="rotate(45 ' + xPos(i).toFixed(1) + ' ' + (margin.top + plotH + 20) + ')">' + q + '</text>';
+    }}
+  }});
+
+  Object.keys(seriesByTicker).forEach(function(ticker) {{
+    const series = seriesByTicker[ticker];
+    const color = colorFor(ticker);
+    const pts = [];
+    allQuarters.forEach(function(q, i) {{
+      if (series[q] !== undefined) pts.push({{i: i, v: series[q], q: q}});
+    }});
+    if (pts.length === 0) return;
+    let path = "";
+    pts.forEach(function(p, i) {{ path += (i === 0 ? "M" : "L") + xPos(p.i).toFixed(1) + "," + yPos(p.v).toFixed(1) + " "; }});
+    out += '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="2" />';
+    pts.forEach(function(p) {{
+      out += '<circle cx="' + xPos(p.i).toFixed(1) + '" cy="' + yPos(p.v).toFixed(1) + '" r="3" fill="' + color + '"><title>' + ticker + ' ' + p.q + ': ' + fmt(p.v) + '</title></circle>';
+    }});
+    const lastPt = pts[pts.length - 1];
+    out += '<text x="' + (xPos(lastPt.i) + 6).toFixed(1) + '" y="' + yPos(lastPt.v).toFixed(1) + '" class="chart-label" fill="' + color + '">' + ticker + '</text>';
+  }});
+
+  out += '<text x="' + (margin.left + plotW / 2).toFixed(1) + '" y="' + (height - 4) + '" class="chart-axis-title" text-anchor="middle">분기</text>';
+  const ylabY = margin.top + plotH / 2;
+  out += '<text x="14" y="' + ylabY.toFixed(1) + '" class="chart-axis-title" text-anchor="middle" transform="rotate(-90 14 ' + ylabY.toFixed(1) + ')">' + yLabel + '</text>';
+
+  svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+  svg.innerHTML = out;
+}}
+
+function updateScatterChart() {{
+  const xMetric = document.getElementById("scatter-x").value;
+  const yMetric = document.getElementById("scatter-y").value;
+  const tickers = selectedTickers("scatter-ticker");
+  const points = [];
+  tickers.forEach(function(ticker) {{
+    const series = CHART_DATA[ticker] || {{}};
+    Object.keys(series).forEach(function(quarter) {{
+      const m = series[quarter];
+      if (m[xMetric] !== undefined && m[yMetric] !== undefined) {{
+        points.push({{x: m[xMetric], y: m[yMetric], ticker: ticker, quarter: quarter}});
+      }}
+    }});
+  }});
+  const svg = document.getElementById("scatter-svg");
+  const note = document.getElementById("scatter-empty-note");
+  if (points.length === 0) {{
+    svg.innerHTML = "";
+    note.style.display = "block";
+  }} else {{
+    note.style.display = "none";
+    renderScatter(svg, points, METRIC_LABELS[xMetric], METRIC_LABELS[yMetric]);
+  }}
+}}
+
+function updateTrendChart() {{
+  const yMetric = document.getElementById("trend-y").value;
+  const tickers = selectedTickers("trend-ticker");
+  const seriesByTicker = {{}};
+  const quarterSet = {{}};
+  tickers.forEach(function(ticker) {{
+    const series = CHART_DATA[ticker] || {{}};
+    const s = {{}};
+    Object.keys(series).forEach(function(quarter) {{
+      const m = series[quarter];
+      if (m[yMetric] !== undefined) {{
+        s[quarter] = m[yMetric];
+        quarterSet[quarter] = true;
+      }}
+    }});
+    if (Object.keys(s).length > 0) seriesByTicker[ticker] = s;
+  }});
+  const allQuarters = Object.keys(quarterSet).sort();
+  const svg = document.getElementById("trend-svg");
+  const note = document.getElementById("trend-empty-note");
+  if (allQuarters.length === 0) {{
+    svg.innerHTML = "";
+    note.style.display = "block";
+  }} else {{
+    note.style.display = "none";
+    renderTrend(svg, seriesByTicker, allQuarters, METRIC_LABELS[yMetric]);
+  }}
+}}
+
+document.querySelectorAll("#scatter-controls select, #scatter-controls input").forEach(function(el) {{
+  el.addEventListener("change", updateScatterChart);
+}});
+document.querySelectorAll("#trend-controls select, #trend-controls input").forEach(function(el) {{
+  el.addEventListener("change", updateTrendChart);
+}});
+
+updateScatterChart();
+updateTrendChart();
+"""
 
 
 def build_summary_report(tickers: list[str], stale_tickers: list[str] | None = None) -> Path:
     stale_set = set(stale_tickers or [])
     rows = []
-    chart_points = []
     for ticker in tickers:
         info = _load_ticker_summary(ticker)
         info["is_stale"] = ticker in stale_set
         rows.append(info)
-        if info["trailing_pe"] and info["roe"] is not None and info["trailing_pe"] > 0:
-            chart_points.append({"ticker": ticker, "pe": info["trailing_pe"], "roe": info["roe"]})
+
+    chart_data = _collect_quarterly_timeseries(tickers)
+    chart_tickers = sorted(chart_data.keys())
 
     html = PAGE_TEMPLATE.format(
         css=CSS,
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
         ticker_count=len(tickers),
         table=_build_table_html(rows),
-        chart=_build_roe_pe_scatter_svg(chart_points),
+        scatter_x_options=_build_metric_options(default="pe_ttm"),
+        scatter_y_options=_build_metric_options(default="roe_ttm"),
+        scatter_ticker_checkboxes=_build_ticker_checkboxes(chart_tickers, name="scatter-ticker"),
+        trend_y_options=_build_metric_options(default="fcf_ttm"),
+        trend_ticker_checkboxes=_build_ticker_checkboxes(chart_tickers, name="trend-ticker"),
+        chart_js=_build_chart_js(chart_data, chart_tickers),
     )
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)

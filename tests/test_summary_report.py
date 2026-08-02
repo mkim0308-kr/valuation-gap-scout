@@ -22,7 +22,7 @@ def isolated_dirs(tmp_path, monkeypatch):
     return data_dir, reports_dir
 
 
-def _write_quant(data_dir, ticker, current_price, fair_value, gap_pct, pe, roe):
+def _write_quant(data_dir, ticker, current_price, fair_value, gap_pct, pe, roe, quarterly=None):
     payload = {
         "as_of": "2026-02-01T00:00:00+00:00",
         "dcf_model_output": {
@@ -34,26 +34,9 @@ def _write_quant(data_dir, ticker, current_price, fair_value, gap_pct, pe, roe):
             "comps_multiples": {"trailing_pe": pe},
             "profitability": {"return_on_equity": roe},
         },
+        "quarterly_timeseries": {"metrics": quarterly or {}},
     }
     (data_dir / f"{ticker}_quant.json").write_text(json.dumps(payload))
-
-
-def test_build_roe_pe_scatter_svg_empty_when_no_points():
-    svg = summary_report._build_roe_pe_scatter_svg([])
-    assert "차트를 그릴 수 없습니다" in svg
-
-
-def test_build_roe_pe_scatter_svg_renders_points_and_labels():
-    points = [
-        {"ticker": "AAPL", "pe": 30, "roe": 1.4},
-        {"ticker": "NVDA", "pe": 45, "roe": 0.9},
-    ]
-    svg = summary_report._build_roe_pe_scatter_svg(points)
-
-    assert svg.startswith("<svg")
-    assert svg.count('class="chart-dot"') == 2
-    assert ">AAPL<" in svg
-    assert ">NVDA<" in svg
 
 
 def test_build_table_html_shows_stale_badge_and_links():
@@ -118,9 +101,12 @@ def test_load_ticker_summary_missing_files_returns_nones(isolated_dirs):
     assert info["primary_moat"] is None
 
 
-def test_build_summary_report_writes_html_with_links_and_chart(isolated_dirs):
+def test_build_summary_report_writes_html_with_links_and_charts(isolated_dirs):
     data_dir, reports_dir = isolated_dirs
-    _write_quant(data_dir, "AAPL", 308.91, 94.57, 2.266, 38.5, 1.488)
+    _write_quant(
+        data_dir, "AAPL", 308.91, 94.57, 2.266, 38.5, 1.488,
+        quarterly={"2025-Q4": {"fcf_ttm": 100.0, "roe_ttm": 0.3, "pe_ttm": 30.0}},
+    )
     (reports_dir / "AAPL_report.html").write_text("<html></html>")
 
     out_path = summary_report.build_summary_report(["AAPL"], stale_tickers=[])
@@ -128,7 +114,68 @@ def test_build_summary_report_writes_html_with_links_and_chart(isolated_dirs):
     assert out_path == reports_dir / "summary_report.html"
     html = out_path.read_text()
     assert 'href="AAPL_report.html"' in html
-    assert "<svg" in html
+    assert 'id="scatter-svg"' in html
+    assert 'id="trend-svg"' in html
+    assert "<script>" in html
+    assert '"AAPL"' in html  # embedded in CHART_DATA / ticker checkboxes
+    assert 'name="scatter-ticker"' in html
+    assert 'name="trend-ticker"' in html
+
+
+def test_collect_quarterly_timeseries_reads_metrics_and_skips_missing(isolated_dirs):
+    data_dir, _ = isolated_dirs
+    _write_quant(
+        data_dir, "AAPL", 308.91, 94.57, 2.266, 38.5, 1.488,
+        quarterly={"2025-Q4": {"fcf_ttm": 100.0, "roe_ttm": 0.3}},
+    )
+    # NVDA has no quant.json at all -> should simply be absent, not fabricated
+
+    result = summary_report._collect_quarterly_timeseries(["AAPL", "NVDA"])
+
+    assert result == {"AAPL": {"2025-Q4": {"fcf_ttm": 100.0, "roe_ttm": 0.3}}}
+
+
+def test_collect_quarterly_timeseries_skips_ticker_with_empty_metrics(isolated_dirs):
+    data_dir, _ = isolated_dirs
+    _write_quant(data_dir, "SPCX", None, None, None, None, None, quarterly={})
+
+    result = summary_report._collect_quarterly_timeseries(["SPCX"])
+
+    assert result == {}
+
+
+def test_build_metric_options_marks_default_selected():
+    html = summary_report._build_metric_options(default="roe_ttm")
+
+    assert '<option value="fcf_ttm">' in html
+    assert '<option value="roe_ttm" selected>' in html
+    assert '<option value="pe_ttm">' in html
+
+
+def test_build_ticker_checkboxes_all_checked_by_default():
+    html = summary_report._build_ticker_checkboxes(["AAPL", "NVDA"], name="scatter-ticker")
+
+    assert html.count('name="scatter-ticker"') == 2
+    assert html.count("checked") == 2
+    assert 'value="AAPL"' in html
+    assert 'value="NVDA"' in html
+
+
+def test_build_chart_js_embeds_data_and_defines_render_functions():
+    chart_data = {"AAPL": {"2025-Q4": {"fcf_ttm": 100.0, "roe_ttm": 0.3, "pe_ttm": 30.0}}}
+
+    js = summary_report._build_chart_js(chart_data, ["AAPL"])
+
+    assert "const CHART_DATA = " in js
+    assert '"AAPL"' in js
+    assert '"fcf_ttm": 100.0' in js
+    assert "function renderScatter(" in js
+    assert "function renderTrend(" in js
+    assert "function updateScatterChart(" in js
+    assert "function updateTrendChart(" in js
+    # every opening brace introduced by JS code must be balanced (a stray
+    # unescaped f-string brace would desync this, not just look wrong)
+    assert js.count("{") == js.count("}")
 
 
 def test_main_check_stale_lists_stale_tickers(isolated_dirs, monkeypatch, capsys):

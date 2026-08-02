@@ -22,9 +22,10 @@ python main.py TICKER
       ├── quant/market_data.py          yfinance: 국채금리, 베타, 시가총액, 부채
       ├── quant/dcf.py                  동적 WACC 계산 + 5년 DCF 적정주가 + 역산 성장률(implied growth rate)
       ├── quant/residual_income.py      잔여이익모델(Residual Income) 적정가 — DCF와 독립적인 두 번째 기준점
-      └── quant/relative_valuation.py   Graham Number, PEG, ROE, ROIC, PSR, comps 배수, 오너어닝스
+      ├── quant/relative_valuation.py   Graham Number, PEG, ROE, ROIC, PSR, comps 배수, 오너어닝스
+      └── quant/quarterly_metrics.py    분기별 ROE·P/E(TTM) 시계열 — summary_report.py의 인터랙티브 차트용
       -> data/{TICKER}_quant.json 저장 (relative_valuation, residual_income_model_output,
-         dcf_model_output.implied_growth_rate_analysis 필드 포함)
+         dcf_model_output.implied_growth_rate_analysis, quarterly_timeseries 필드 포함)
 
 python extended_metrics.py TICKER [--peers ...]   (선택, LLM 없음, 11개 모듈)
 ├── quant/peer_comps.py             피어 그룹 대비 배수/ROE 비교
@@ -60,7 +61,9 @@ python -m quant.trend TICKER   (선택, LLM 없음)
 
 python summary_report.py [--check-stale]   (선택, LLM 없음)
 └── reports/ 폴더의 모든 티커를 모아 대시보드 생성 (파이프라인을 실행하지 않음 — 이미 있는 리포트만 집계)
-      -> reports/summary_report.html 저장 (티커별 링크 + 최근 ROE vs P/E 차트)
+      -> reports/summary_report.html 저장 — 티커별 링크 표 + 인터랙티브 차트 2개
+         (분기별 X-Y 산점도, 분기별 시계열 추세 — 둘 다 지표/티커를 드롭다운·체크박스로
+         자유롭게 선택 가능, quant_agent.py가 저장한 quarterly_timeseries 기반)
       --check-stale: 요약 대신 30일 이상 갱신 안 된 티커 목록만 출력
 
 data/      Agent 1/1b~1g·6·7·8이 저장하는 원본 JSON + Agent 2/3/4의 중간 JSON
@@ -167,11 +170,27 @@ python summary_report.py
 ```
 
 그 시점에 `reports/` 폴더에 있는 모든 티커를 스캔해 `reports/summary_report.html`을
-만듭니다 — 티커별 현재가/DCF 적정가/괴리율/핵심 해자 요약과 각 리포트로
-가는 링크, 그리고 최근 ROE vs P/E 산점도가 담깁니다. **이 스크립트는
-파이프라인을 실행하지 않습니다** — 이미 생성된 리포트를 모을 뿐입니다
-(해석 서브에이전트는 Claude Code 대화 세션에서만 동작하므로, 터미널
-스크립트 혼자서 자동 갱신할 수 없습니다).
+만듭니다 — 티커별 현재가/DCF 적정가/괴리율/핵심 해자 요약 표와 각 리포트로
+가는 링크, 그리고 인터랙티브 차트 2개가 담깁니다:
+
+- **분기별 지표 산점도(X-Y)**: X축·Y축 지표(FCF/ROE/P·E, TTM 기준)와 표시할
+  티커를 드롭다운·체크박스로 자유롭게 고를 수 있고, 선택된 티커가 보유한
+  **모든 분기**의 값이 점으로 찍히고 시간순으로 얇은 선으로 이어집니다.
+- **분기별 지표 시계열 추세**: X축은 분기, Y축은 선택한 지표. 마찬가지로
+  티커를 자유롭게 선택할 수 있고 모든 분기 데이터를 선으로 표시합니다.
+
+두 차트 모두 `data/{TICKER}_quant.json`의 `quarterly_timeseries`(ROE는 SEC
+XBRL 분기 재구성, P/E는 분기 말 주가 × 현재 발행주식수 근사)를 그대로
+사용하며, 지어낸 값은 없습니다 — 데이터가 없는 티커·분기는 조용히
+빠집니다. **이 스크립트는 파이프라인을 실행하지 않습니다** — 이미
+생성된 리포트를 모을 뿐입니다 (해석 서브에이전트는 Claude Code 대화
+세션에서만 동작하므로, 터미널 스크립트 혼자서 자동 갱신할 수 없습니다).
+
+> 이 두 차트는 드롭다운으로 축·티커를 바꾸면 서버 없이 즉시 다시
+> 그려져야 해서, 이 프로젝트에서 처음으로 **인라인 자바스크립트**를
+> 씁니다(외부 CDN·프레임워크·빌드 과정은 여전히 없음 — 순수 HTML 파일
+> 하나에 전부 포함). `render_html.py`가 만드는 개별 티커 리포트는
+> 지금처럼 스크립트 없는 정적 HTML 그대로입니다.
 
 ```bash
 python summary_report.py --check-stale
@@ -320,7 +339,16 @@ pytest tests/
   결과도 함께 왜곡됩니다.
 - **요약 대시보드**(`summary_report.py`): 완전 무인 자동화가 아닙니다 —
   해석 서브에이전트가 Claude Code 세션 안에서만 동작하므로, 오래된 티커
-  갱신은 이 채팅에서 요청해야 진행됩니다. ROE vs P/E 차트는 matplotlib 등
-  외부 의존성 없이 직접 그린 SVG라, 값이 극단적으로 몰린 티커(예: P/E가
-  유난히 높은 종목)가 있으면 나머지 점들이 한쪽에 뭉쳐 보일 수 있고, 값이
-  가까운 티커끼리는 라벨이 겹칠 수 있습니다.
+  갱신은 이 채팅에서 요청해야 진행됩니다. 두 인터랙티브 차트는
+  matplotlib·D3 등 외부 의존성 없이 직접 그린 SVG+바닐라 JS라, 값이
+  극단적으로 몰린 티커(예: P/E가 유난히 높은 종목)가 있으면 나머지
+  점들이 한쪽에 뭉쳐 보일 수 있고, 값이 가까운 티커끼리는 라벨이 겹칠
+  수 있습니다.
+- **분기별 ROE·P/E 시계열**(`quant/quarterly_metrics.py`): ROE는 SEC XBRL
+  분기 재구성(NetIncomeLoss TTM ÷ 분기 말 StockholdersEquity)이라 FCF와
+  동일한 깊이(최근 5년)를 갖지만, P/E는 **각 분기 시점의 실제 발행주식수가
+  아니라 현재 발행주식수로 시가총액을 근사**합니다(SEC가 과거 시점별
+  희석주식수를 깔끔하게 노출하지 않기 때문) — 자사주매입·증자가 많았던
+  종목일수록 과거 구간의 정확도가 떨어집니다. 두 지표 모두 해당 분기의
+  TTM(순이익 4분기 합) 기준이며, 순이익이 음수인 분기는 P/E가 정의되지
+  않아 조용히 빠집니다(지어내지 않음).
