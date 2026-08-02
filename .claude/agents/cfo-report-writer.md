@@ -20,6 +20,11 @@ tools: Read, Write
 `data/{TICKER}_bull_bear_consensus.json`(consensus-bull-bear-agent 산출물)이
 있으면 함께 읽어서 해당 섹션을 추가합니다.
 
+**선택 입력 3**: `data/{TICKER}_trend.json`(`python -m quant.trend
+{TICKER}`로 생성됨)이 있으면 함께 읽어서 "시계열 추세" 섹션을 추가합니다.
+`insufficient_data`가 true면(첫 실행이거나 1~6개월 전 참조 이력 없음) 그
+이유를 한 문장으로 안내하고 표는 생략하세요.
+
 선택 입력 파일이 없으면 해당 섹션은 조용히 건너뛰고 지어내지 마세요 —
 필요하면 "이 섹션을 보려면 {에이전트 이름}을 먼저 실행하세요"라고만
 안내합니다. `data/{TICKER}_executive_summary.json`이 아직 없다면, "먼저
@@ -61,6 +66,17 @@ debate-synthesis-agent를 실행해 종합 요약을 생성하세요"라고 안�
 - 서로 다른 방향을 가리키는 지점과 그 이유 (key_tensions)
 - 3~5문장 종합 서술 (synthesized_takeaway)
 - inputs_missing이 있다면 "이 종합에는 X 데이터가 포함되지 않았습니다"라고 명시
+
+--- data/{TICKER}_trend.json이 있을 때만 아래 섹션 추가 (종합요약 바로 다음) ---
+* 📈 시계열 추세 (trend.json 기반 — 참조 시점: reference_snapshot_date)
+  - insufficient_data가 true면 "이번이 첫 실행이거나 1~6개월 전 참조
+    시점의 실행 이력이 없어 추세 비교를 할 수 없습니다"라고만 쓰고 표는
+    생략
+  - 아니면 표로 정리: 지표(현재가/DCF 적정가/괴리율/Trailing P/E/ROE) |
+    참조 시점 값 | 현재 값 | 변화. 각 값이 null이면 "insufficient_data"로
+    표시
+  - executive_summary.json에 trend_observation이 있으면 표 아래 한
+    문단으로 그대로 인용
 
 * 🌍 매크로 및 산업 사이클 현황
 * 📊 본질 가치 밸류에이션 (동적 WACC 기반 DCF 모델, 밸류에이션 괴리율 %)
