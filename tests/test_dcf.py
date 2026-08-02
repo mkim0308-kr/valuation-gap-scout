@@ -1,6 +1,12 @@
 import pytest
 
-from quant.dcf import calculate_fair_value, calculate_wacc, valuation_gap
+from quant.dcf import (
+    calculate_fair_value,
+    calculate_implied_growth_rate,
+    calculate_wacc,
+    compute_cost_of_equity,
+    valuation_gap,
+)
 
 
 def test_calculate_wacc_matches_manual_capm_calculation():
@@ -111,3 +117,69 @@ def test_calculate_fair_value_caps_runaway_growth_rate():
 def test_valuation_gap_sign_matches_premium_or_discount():
     assert valuation_gap(current_price=110, fair_value_per_share=100) == pytest.approx(0.10)
     assert valuation_gap(current_price=90, fair_value_per_share=100) == pytest.approx(-0.10)
+
+
+def test_compute_cost_of_equity_matches_capm():
+    # Re = Rf + Beta * ERP = 0.04 + 1.2*0.055 = 0.106
+    assert compute_cost_of_equity(risk_free_rate=0.04, beta=1.2) == pytest.approx(0.106)
+
+
+def test_calculate_implied_growth_rate_recovers_known_growth_rate():
+    # Build a fair value at a known (unclamped) growth rate, then check the
+    # reverse search finds that same rate given that price as the target.
+    known_growth_rate = 0.15
+    target = calculate_fair_value(
+        latest_fcf=100,
+        fcf_cagr=known_growth_rate,
+        wacc=0.10,
+        total_debt=0,
+        shares_outstanding=100,
+    )["fair_value_per_share"]
+
+    result = calculate_implied_growth_rate(
+        current_price=target,
+        latest_fcf=100,
+        wacc=0.10,
+        total_debt=0,
+        shares_outstanding=100,
+    )
+
+    assert result["insufficient_data_reason"] is None
+    assert result["implied_growth_rate"] == pytest.approx(known_growth_rate, abs=0.002)
+
+
+def test_calculate_implied_growth_rate_none_when_fcf_not_positive():
+    result = calculate_implied_growth_rate(
+        current_price=100, latest_fcf=0, wacc=0.10, total_debt=0, shares_outstanding=100
+    )
+    assert result["implied_growth_rate"] is None
+    assert "FCF" in result["insufficient_data_reason"]
+
+
+def test_calculate_implied_growth_rate_none_when_wacc_below_terminal_growth():
+    result = calculate_implied_growth_rate(
+        current_price=100,
+        latest_fcf=100,
+        wacc=0.02,
+        total_debt=0,
+        shares_outstanding=100,
+        terminal_growth_rate=0.025,
+    )
+    assert result["implied_growth_rate"] is None
+    assert "WACC" in result["insufficient_data_reason"]
+
+
+def test_calculate_implied_growth_rate_none_when_price_below_lower_bound_fair_value():
+    result = calculate_implied_growth_rate(
+        current_price=0.01, latest_fcf=100, wacc=0.10, total_debt=0, shares_outstanding=100
+    )
+    assert result["implied_growth_rate"] is None
+    assert result["insufficient_data_reason"] is not None
+
+
+def test_calculate_implied_growth_rate_none_when_price_exceeds_search_bounds():
+    result = calculate_implied_growth_rate(
+        current_price=1e15, latest_fcf=100, wacc=0.10, total_debt=0, shares_outstanding=100
+    )
+    assert result["implied_growth_rate"] is None
+    assert "불가능" in result["insufficient_data_reason"]

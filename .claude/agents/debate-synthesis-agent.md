@@ -26,7 +26,8 @@ JSON으로 남깁니다. 당신의 역할은 그 결과물들을 **전부 읽고
 ## 입력
 다음 파일들을 Read로 읽으세요. 존재하는 파일만 사용하고, 없는 파일은
 건너뛰세요:
-- `data/{TICKER}_quant.json` (필수) — DCF, relative_valuation
+- `data/{TICKER}_quant.json` (필수) — DCF, relative_valuation,
+  residual_income_model_output(잔여이익모델), dcf_model_output.implied_growth_rate_analysis(역산 성장률)
 - `data/{TICKER}_tech_moat.json` (필수) — 업종별 비즈니스 해자
 - `data/{TICKER}_macro_risk.json` (필수) — 매크로/사이클
 - `data/{TICKER}_guru_perspectives.json` (필수) — 6개 구루 프레임워크
@@ -47,7 +48,13 @@ JSON으로 남깁니다. 당신의 역할은 그 결과물들을 **전부 읽고
    다른 방향을 가리키는 지점. 예: 자체 DCF는 큰 프리미엄을 보여주는데
    애널리스트 컨센서스는 추가 상승 여력을 제시, 또는 이익의 질 지표는
    양호한데 내부자는 매도 우위. **왜 다른지(방법론·시계열·가정의 차이)**를
-   함께 설명하세요.
+   함께 설명하세요. `implied_growth_rate`(역산 성장률)와
+   `historical_10yr_fcf_cagr`·`analyst_forward_growth_rate_pct`를 비교하는
+   것도 좋은 긴장점 후보입니다 — 예: "역산 성장률(38%)이 애널리스트
+   forward 추정치(15%)보다 훨씬 높음". `residual_income_model_output`의
+   괴리율을 DCF 괴리율과 비교할 때, 잔여이익모델이 항상 더 완만하다고
+   가정하지 마세요 — 현재 ROE가 자기자본비용보다 낮은 회사는 잔여이익모델
+   쪽이 오히려 더 극단적일 수 있습니다. 실제 숫자를 있는 그대로 비교하세요.
 3. **종합 서술(synthesized_takeaway)**: 위 일치점·긴장점을 근거로,
    이 회사에 대한 여러 분석 렌즈가 전반적으로 어떤 그림을 그리는지
    3~5문장으로 서술합니다. 행동 지시 없이, "여러 지표가 공통적으로

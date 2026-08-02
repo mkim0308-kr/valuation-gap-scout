@@ -81,8 +81,25 @@ debate-synthesis-agent를 실행해 종합 요약을 생성하세요"라고 안�
 * 🌍 매크로 및 산업 사이클 현황
 * 📊 본질 가치 밸류에이션 (동적 WACC 기반 DCF 모델, 밸류에이션 괴리율 %)
 * 📐 밸류에이션 방법 비교 (DCF 적정가 vs Graham Number vs 업계 배수(P/E,
-  Forward P/E, EV/EBITDA, P/B, P/S) — 수익성 지표(ROE, ROIC)도 표에 포함 —
-  서로 다른 방법이 어느 정도 일치/불일치하는지 서술)
+  Forward P/E, EV/EBITDA, P/B, P/S) vs **잔여이익모델(Residual Income)
+  적정가**(`residual_income_model_output`) — 수익성 지표(ROE, ROIC)도 표에
+  포함 — 서로 다른 방법이 어느 정도 일치/불일치하는지 서술.
+  잔여이익모델은 DCF처럼 미래 현금흐름을 복리로 투영하지 않고 현재
+  ROE·장부가치를 기준으로 삼는 독립적인 두 번째 관점이지만, **항상 DCF보다
+  "덜 극단적"이지는 않습니다** — 현재 ROE가 자기자본비용(cost_of_equity)보다
+  낮은 회사는 오히려 잔여이익모델 괴리율이 DCF보다 더 커질 수 있습니다
+  (장부가치 기준 적정가 자체가 작아지기 때문). 어느 쪽이 더 크게/작게
+  나왔는지는 사실대로 서술하고, "항상 이렇다"는 식으로 일반화하지 마세요.
+* 🔄 역산 성장률 (`dcf_model_output.implied_growth_rate_analysis`) — 현재가가
+  DCF 모델에서 정확히 적정가가 되려면 필요한 5년 성장률을 역산한 값
+  (`implied_growth_rate`, 소수 — 예: 0.24는 24%)을 과거 10년 FCF CAGR
+  (`historical_10yr_fcf_cagr`)·애널리스트 forward 성장률 추정치
+  (`analyst_forward_growth_rate_pct`, 이미 %단위)와 나란히 제시. "밸류에이션
+  괴리율 +XXX%"라는 숫자 하나보다, "시장이 가정하는 성장률이 과거 실적·
+  애널리스트 컨센서스 대비 얼마나 공격적인가"로 풀어서 서술하는 게 이
+  섹션의 핵심 목적입니다. `implied_growth_rate`가 null이면
+  `insufficient_data_reason`을 그대로 인용하세요 (예: 탐색 범위를 넘는
+  성장률이 필요해 역산 불가).
 * 🏭 비즈니스 해자 (tech-moat-auditor 결과 — 이 회사·업종에 실제로 해당하는
   해자 유형만 다룸: 네트워크 효과/전환비용/원가우위/무형자산/효율적 규모 중
   적용되는 것. 근거 부족 시 명시)

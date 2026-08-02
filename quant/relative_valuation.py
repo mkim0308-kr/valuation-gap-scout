@@ -110,6 +110,7 @@ def get_relative_valuation_metrics(
     )
 
     return {
+        "book_value_per_share": book_value_per_share,
         "comps_multiples": {
             "trailing_pe": trailing_pe,
             "forward_pe": forward_pe,
