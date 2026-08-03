@@ -105,7 +105,9 @@ def test_build_summary_report_writes_html_with_links_and_charts(isolated_dirs):
     data_dir, reports_dir = isolated_dirs
     _write_quant(
         data_dir, "AAPL", 308.91, 94.57, 2.266, 38.5, 1.488,
-        quarterly={"2025-Q4": {"fcf_ttm": 100.0, "roe_ttm": 0.3, "pe_ttm": 30.0}},
+        quarterly={
+            "2025-Q4": {"fcf_ttm": 100.0, "roe_ttm": 0.3, "pe_ttm": 30.0, "end_date": "2025-12-31"}
+        },
     )
     (reports_dir / "AAPL_report.html").write_text("<html></html>")
 
@@ -120,6 +122,8 @@ def test_build_summary_report_writes_html_with_links_and_charts(isolated_dirs):
     assert '"AAPL"' in html  # embedded in CHART_DATA / ticker checkboxes
     assert 'name="scatter-ticker"' in html
     assert 'name="trend-ticker"' in html
+    assert '"end_date": "2025-12-31"' in html
+    assert "실제 캘린더" in html  # caption explaining fiscal-year-label caveat
 
 
 def test_collect_quarterly_timeseries_reads_metrics_and_skips_missing(isolated_dirs):
@@ -162,17 +166,26 @@ def test_build_ticker_checkboxes_all_checked_by_default():
 
 
 def test_build_chart_js_embeds_data_and_defines_render_functions():
-    chart_data = {"AAPL": {"2025-Q4": {"fcf_ttm": 100.0, "roe_ttm": 0.3, "pe_ttm": 30.0}}}
+    chart_data = {
+        "AAPL": {
+            "2025-Q4": {"fcf_ttm": 100.0, "roe_ttm": 0.3, "pe_ttm": 30.0, "end_date": "2025-12-31"}
+        }
+    }
 
     js = summary_report._build_chart_js(chart_data, ["AAPL"])
 
     assert "const CHART_DATA = " in js
     assert '"AAPL"' in js
     assert '"fcf_ttm": 100.0' in js
+    assert '"end_date": "2025-12-31"' in js
     assert "function renderScatter(" in js
     assert "function renderTrend(" in js
     assert "function updateScatterChart(" in js
     assert "function updateTrendChart(" in js
+    # the trend chart positions by real end_date, not by fiscal-label order
+    # (two tickers' same-numbered fiscal quarter can be many months apart)
+    assert "m.end_date" in js
+    assert "new Date(" in js
     # every opening brace introduced by JS code must be balanced (a stray
     # unescaped f-string brace would desync this, not just look wrong)
     assert js.count("{") == js.count("}")

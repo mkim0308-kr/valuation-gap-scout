@@ -154,7 +154,9 @@ PAGE_TEMPLATE = """<!doctype html>
 <h2>분기별 지표 산점도 (X-Y)</h2>
 <p class="muted" style="font-size:0.85rem; margin-top:-8px;">
 각 티커가 보유한 모든 분기의 (X, Y) 값을 점으로 표시하고, 시간 순서대로 얇은 선으로 연결합니다.
-가장 최근 분기는 큰 점으로 강조됩니다. 점에 마우스를 올리면 정확한 값을 볼 수 있습니다.
+가장 최근 분기는 큰 점으로 강조됩니다. 점에 마우스를 올리면 정확한 값과 실제 종료일을 볼 수 있습니다.
+분기 번호(예: "2027-Q1")는 각 회사의 회계연도 기준이라 캘린더 연도와 다를 수 있습니다 — 미래
+데이터가 아니며, 툴팁의 실제 날짜가 기준입니다.
 </p>
 <div class="chart-controls" id="scatter-controls">
   <div class="control-group">
@@ -179,7 +181,9 @@ PAGE_TEMPLATE = """<!doctype html>
 
 <h2>분기별 지표 시계열 추세</h2>
 <p class="muted" style="font-size:0.85rem; margin-top:-8px;">
-X축은 분기, Y축은 선택한 지표입니다. 각 티커가 보유한 모든 분기 데이터를 선으로 이어 표시합니다.
+X축은 각 분기의 실제 캘린더 종료일(회계연도 라벨이 아님), Y축은 선택한 지표입니다. 회사마다
+회계연도 종료월이 달라(예: 12월 결산 vs NVIDIA의 1월 결산), 같은 분기 번호라도 실제로는
+몇 개월~1년 가까이 차이 날 수 있어 라벨이 아닌 실제 날짜 기준으로 위치를 계산합니다.
 </p>
 <div class="chart-controls" id="trend-controls">
   <div class="control-group">
@@ -403,7 +407,7 @@ function renderScatter(svg, points, xLabel, yLabel) {{
     pts.forEach(function(p, i) {{
       const isLast = i === pts.length - 1;
       out += '<circle cx="' + xPos(p.x).toFixed(1) + '" cy="' + yPos(p.y).toFixed(1) + '" r="' + (isLast ? 5 : 3) +
-        '" fill="' + color + '" opacity="' + (isLast ? 1 : 0.55) + '"><title>' + p.ticker + ' ' + p.quarter + ': (' + fmt(p.x) + ', ' + fmt(p.y) + ')</title></circle>';
+        '" fill="' + color + '" opacity="' + (isLast ? 1 : 0.55) + '"><title>' + p.ticker + ' ' + p.quarter + (p.endDate ? ' (' + p.endDate + ')' : '') + ': (' + fmt(p.x) + ', ' + fmt(p.y) + ')</title></circle>';
     }});
     const last = pts[pts.length - 1];
     out += '<text x="' + xPos(last.x).toFixed(1) + '" y="' + (yPos(last.y) - 10).toFixed(1) + '" class="chart-label" text-anchor="middle" fill="' + color + '">' + ticker + '</text>';
@@ -417,21 +421,31 @@ function renderScatter(svg, points, xLabel, yLabel) {{
   svg.innerHTML = out;
 }}
 
-function renderTrend(svg, seriesByTicker, allQuarters, yLabel) {{
+function renderTrend(svg, seriesByTicker, yLabel) {{
+  // seriesByTicker: {{ticker: [{{quarter, date, v}}, ...]}} — positioned by
+  // each point's actual calendar date (date.getTime()), NOT by fiscal-year
+  // label order. Two tickers' same-numbered fiscal quarter can be many
+  // months apart in real time (e.g. NVIDIA's fiscal year runs far ahead of
+  // a December-FYE company's) — a label/category axis would silently draw
+  // them as if they were simultaneous, so real elapsed time is what
+  // determines horizontal position here.
   const width = 760, height = 440;
   const margin = {{top: 20, right: 20, bottom: 60, left: 62}};
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
 
   const allValues = [];
+  const allDates = [];
   Object.keys(seriesByTicker).forEach(function(t) {{
-    Object.keys(seriesByTicker[t]).forEach(function(q) {{ allValues.push(seriesByTicker[t][q]); }});
+    seriesByTicker[t].forEach(function(p) {{ allValues.push(p.v); allDates.push(p.date); }});
   }});
+  if (allDates.length === 0) return false;
   const yr = niceRange(allValues);
   const ylo = yr[0], yhi = yr[1];
+  const dateLo = Math.min.apply(null, allDates), dateHi = Math.max.apply(null, allDates);
 
-  function xPos(idx) {{
-    return allQuarters.length <= 1 ? margin.left + plotW / 2 : margin.left + plotW * idx / (allQuarters.length - 1);
+  function xPos(dateMs) {{
+    return dateHi === dateLo ? margin.left + plotW / 2 : margin.left + (dateMs - dateLo) / (dateHi - dateLo) * plotW;
   }}
   function yPos(y) {{ return margin.top + (1 - (y - ylo) / (yhi - ylo)) * plotH; }}
 
@@ -443,37 +457,36 @@ function renderTrend(svg, seriesByTicker, allQuarters, yLabel) {{
     out += '<line x1="' + margin.left + '" y1="' + gy.toFixed(1) + '" x2="' + (margin.left + plotW) + '" y2="' + gy.toFixed(1) + '" class="chart-grid" />';
     out += '<text x="' + (margin.left - 8) + '" y="' + (gy + 4).toFixed(1) + '" class="chart-tick" text-anchor="end">' + fmt(yVal) + '</text>';
   }}
-  const xLabelStep = Math.max(1, Math.ceil(allQuarters.length / 9));
-  allQuarters.forEach(function(q, i) {{
-    if (i % xLabelStep === 0 || i === allQuarters.length - 1) {{
-      out += '<text x="' + xPos(i).toFixed(1) + '" y="' + (margin.top + plotH + 20) + '" class="chart-tick" text-anchor="middle" transform="rotate(45 ' + xPos(i).toFixed(1) + ' ' + (margin.top + plotH + 20) + ')">' + q + '</text>';
-    }}
-  }});
+  const nXTicks = 6;
+  for (let i = 0; i <= nXTicks; i++) {{
+    const dateMs = dateLo + (dateHi - dateLo) * i / nXTicks;
+    const gx = xPos(dateMs);
+    const label = new Date(dateMs).toISOString().slice(0, 7);
+    out += '<text x="' + gx.toFixed(1) + '" y="' + (margin.top + plotH + 20) + '" class="chart-tick" text-anchor="middle" transform="rotate(45 ' + gx.toFixed(1) + ' ' + (margin.top + plotH + 20) + ')">' + label + '</text>';
+  }}
 
   Object.keys(seriesByTicker).forEach(function(ticker) {{
-    const series = seriesByTicker[ticker];
-    const color = colorFor(ticker);
-    const pts = [];
-    allQuarters.forEach(function(q, i) {{
-      if (series[q] !== undefined) pts.push({{i: i, v: series[q], q: q}});
-    }});
+    const pts = seriesByTicker[ticker].slice().sort(function(a, b) {{ return a.date - b.date; }});
     if (pts.length === 0) return;
+    const color = colorFor(ticker);
     let path = "";
-    pts.forEach(function(p, i) {{ path += (i === 0 ? "M" : "L") + xPos(p.i).toFixed(1) + "," + yPos(p.v).toFixed(1) + " "; }});
+    pts.forEach(function(p, i) {{ path += (i === 0 ? "M" : "L") + xPos(p.date).toFixed(1) + "," + yPos(p.v).toFixed(1) + " "; }});
     out += '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="2" />';
     pts.forEach(function(p) {{
-      out += '<circle cx="' + xPos(p.i).toFixed(1) + '" cy="' + yPos(p.v).toFixed(1) + '" r="3" fill="' + color + '"><title>' + ticker + ' ' + p.q + ': ' + fmt(p.v) + '</title></circle>';
+      const dateStr = new Date(p.date).toISOString().slice(0, 10);
+      out += '<circle cx="' + xPos(p.date).toFixed(1) + '" cy="' + yPos(p.v).toFixed(1) + '" r="3" fill="' + color + '"><title>' + ticker + ' ' + p.quarter + ' (' + dateStr + '): ' + fmt(p.v) + '</title></circle>';
     }});
     const lastPt = pts[pts.length - 1];
-    out += '<text x="' + (xPos(lastPt.i) + 6).toFixed(1) + '" y="' + yPos(lastPt.v).toFixed(1) + '" class="chart-label" fill="' + color + '">' + ticker + '</text>';
+    out += '<text x="' + (xPos(lastPt.date) + 6).toFixed(1) + '" y="' + yPos(lastPt.v).toFixed(1) + '" class="chart-label" fill="' + color + '">' + ticker + '</text>';
   }});
 
-  out += '<text x="' + (margin.left + plotW / 2).toFixed(1) + '" y="' + (height - 4) + '" class="chart-axis-title" text-anchor="middle">분기</text>';
+  out += '<text x="' + (margin.left + plotW / 2).toFixed(1) + '" y="' + (height - 4) + '" class="chart-axis-title" text-anchor="middle">기간(실제 캘린더 기준)</text>';
   const ylabY = margin.top + plotH / 2;
   out += '<text x="14" y="' + ylabY.toFixed(1) + '" class="chart-axis-title" text-anchor="middle" transform="rotate(-90 14 ' + ylabY.toFixed(1) + ')">' + yLabel + '</text>';
 
   svg.setAttribute("viewBox", "0 0 " + width + " " + height);
   svg.innerHTML = out;
+  return true;
 }}
 
 function updateScatterChart() {{
@@ -486,7 +499,7 @@ function updateScatterChart() {{
     Object.keys(series).forEach(function(quarter) {{
       const m = series[quarter];
       if (m[xMetric] !== undefined && m[yMetric] !== undefined) {{
-        points.push({{x: m[xMetric], y: m[yMetric], ticker: ticker, quarter: quarter}});
+        points.push({{x: m[xMetric], y: m[yMetric], ticker: ticker, quarter: quarter, endDate: m.end_date}});
       }}
     }});
   }});
@@ -505,28 +518,32 @@ function updateTrendChart() {{
   const yMetric = document.getElementById("trend-y").value;
   const tickers = selectedTickers("trend-ticker");
   const seriesByTicker = {{}};
-  const quarterSet = {{}};
+  let anyPoints = false;
   tickers.forEach(function(ticker) {{
     const series = CHART_DATA[ticker] || {{}};
-    const s = {{}};
+    const pts = [];
     Object.keys(series).forEach(function(quarter) {{
       const m = series[quarter];
-      if (m[yMetric] !== undefined) {{
-        s[quarter] = m[yMetric];
-        quarterSet[quarter] = true;
+      // end_date is required to place this point on the real-time axis —
+      // a quarter with a value but no known end date is skipped rather
+      // than guessed or forced onto an arbitrary position.
+      if (m[yMetric] !== undefined && m.end_date) {{
+        pts.push({{quarter: quarter, date: new Date(m.end_date).getTime(), v: m[yMetric]}});
       }}
     }});
-    if (Object.keys(s).length > 0) seriesByTicker[ticker] = s;
+    if (pts.length > 0) {{
+      seriesByTicker[ticker] = pts;
+      anyPoints = true;
+    }}
   }});
-  const allQuarters = Object.keys(quarterSet).sort();
   const svg = document.getElementById("trend-svg");
   const note = document.getElementById("trend-empty-note");
-  if (allQuarters.length === 0) {{
+  if (!anyPoints) {{
     svg.innerHTML = "";
     note.style.display = "block";
   }} else {{
     note.style.display = "none";
-    renderTrend(svg, seriesByTicker, allQuarters, METRIC_LABELS[yMetric]);
+    renderTrend(svg, seriesByTicker, METRIC_LABELS[yMetric]);
   }}
 }}
 
