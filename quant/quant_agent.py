@@ -123,6 +123,24 @@ def run_quant_agent(ticker: str) -> dict:
     for quarter, value in roe_pe_series["pe_by_quarter"].items():
         quarterly_timeseries.setdefault(quarter, {})["pe_ttm"] = value
 
+    # Each quarter's real calendar end date, for charts that need to
+    # position/label by actual time instead of the raw fiscal-year label
+    # (e.g. NVIDIA's fiscal year runs ~10 months ahead of a December-FYE
+    # company's, so "2026-Q2" alone is not a safe cross-ticker time axis).
+    # Merged from whichever tag family has it — equity and OCF cover the
+    # same fiscal periods FCF/ROE/PE are built from.
+    quarter_end_dates: dict[str, str] = {}
+    for source_dates in (
+        sec_data.get_5yr_quarterly_snapshot_dates(ticker, quarterly_metrics.STOCKHOLDERS_EQUITY_TAGS),
+        sec_data.get_5yr_quarterly_snapshot_dates(ticker, sec_data.OPERATING_CASHFLOW_TAGS),
+    ):
+        for quarter, end_date in source_dates.items():
+            quarter_end_dates.setdefault(quarter, end_date)
+    for quarter, metrics in quarterly_timeseries.items():
+        end_date = quarter_end_dates.get(quarter)
+        if end_date:
+            metrics["end_date"] = end_date
+
     result = {
         "ticker": ticker,
         "as_of": datetime.now(timezone.utc).isoformat(),
@@ -203,7 +221,13 @@ def run_quant_agent(ticker: str) -> dict:
                 "share count for every historical quarter (SEC doesn't cleanly expose a "
                 "point-in-time historical diluted share count), least accurate for names "
                 "with heavy buyback/issuance activity. A quarter only appears for a given "
-                "metric if SEC/price data was actually available for it — never guessed."
+                "metric if SEC/price data was actually available for it — never guessed. "
+                "The quarter key (e.g. '2027-Q1') is the company's own SEC fiscal-year "
+                "label, not a calendar quarter — fiscal year ends vary by company (e.g. "
+                "NVIDIA's fiscal year starts ~10 months ahead of a December-FYE company's), "
+                "so two tickers' same-numbered quarter can be many months apart in real "
+                "time. end_date is each quarter's actual calendar end date, included "
+                "specifically so charts can position/label by real time instead."
             ),
         },
     }
